@@ -57,11 +57,13 @@ archon:
     # A person merges. Switch to auto once main requires a CI check on
     # up-to-date branches and the repository allows auto-merge.
     policy: manual
-  models:
-    # Profiles come from the service's shared model catalogue (archon-v3
-    # docs/operations.md, Models); a Model label on an issue picks another.
-    default: sol
-    fallback: opus
+  # No models section: the service's project_defaults pick the default and
+  # fallback profiles; a Model label on an issue picks another.
+  stacking:
+    # An issue labelled "Stack: Allowed" may start on its one unfinished
+    # blocker's open pull request once that blocker is In Review (archon-v3
+    # docs/operator-guide.md, Stacking). Stacks are one level deep.
+    enabled: true
 ---
 You are working on Boids, Linear issue {{ issue.identifier }}: {{ issue.title }}.
 {% if attempt %}
