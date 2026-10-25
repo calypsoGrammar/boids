@@ -1,0 +1,258 @@
+// Baseline for CAL-1282 (BOIDS-V1-01). These tests pin the behaviour of the
+// simulation as audited, including the known defects listed in
+// docs/audit/BOIDS-V1-01.md. A "KNOWN DEFECT" test asserts the current, wrong
+// behaviour so the fix ticket that corrects it has to update the test on
+// purpose; the defect ID matches the inventory in the audit document.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { loadPage } from './harness.js';
+
+const speed = (agent) => Math.hypot(agent.vx, agent.vy);
+const finite = (agent) => [agent.x, agent.y, agent.vx, agent.vy].every(Number.isFinite);
+
+test('default settings generate a paused flock of 50 circles that fills the viewport', () => {
+  const page = loadPage({ width: 1280, height: 720 });
+  page.load();
+  const flock = page.flock;
+  assert.equal(flock.agents.length, 50);
+  assert.equal(flock.shape, 'circle');
+  assert.equal(flock.raceCount, 2);
+  assert.equal(flock.wrap, true);
+  assert.deepEqual([flock.width, flock.height], [1280, 720]);
+  assert.equal(page.timers.size, 0, 'nothing runs until Play is pressed');
+  assert.equal(page.elements.IS_PAUSED.style.display, '', 'Play button visible');
+  assert.equal(page.elements.IS_PLAYING.style.display, 'none', 'Pause button hidden');
+  assert.ok(page.calls.some(([name]) => name === 'arc'), 'first frame is drawn');
+});
+
+test('play, pause and step drive the 8 ms interval and swap the buttons', () => {
+  const page = loadPage();
+  page.load();
+  page.click('IS_PAUSED');
+  assert.equal(page.timers.size, 1);
+  assert.equal(page.elements.IS_PAUSED.style.display, 'none');
+  assert.equal(page.elements.IS_PLAYING.style.display, '');
+
+  page.click('IS_PLAYING');
+  assert.equal(page.timers.size, 0);
+  assert.equal(page.elements.IS_PAUSED.style.display, '');
+
+  const before = page.flock.agents.map((a) => a.x);
+  page.click('nextButton');
+  assert.equal(page.timers.size, 0, 'step leaves the simulation paused');
+  assert.notDeepEqual(page.flock.agents.map((a) => a.x), before, 'step advances one frame');
+});
+
+test('the options button toggles the settings menu', () => {
+  const page = loadPage();
+  page.load();
+  page.click('optionsButton');
+  assert.equal(page.elements.settingsMenu.style.display, '');
+  page.click('optionsButton');
+  assert.equal(page.elements.settingsMenu.style.display, 'none');
+});
+
+test('default settings run for 10 seconds of frames without losing agents', () => {
+  const page = loadPage({ seed: 1 });
+  page.load();
+  page.click('IS_PAUSED');
+  page.tick(1250);
+  assert.ok(page.flock.agents.every(finite));
+});
+
+test('turn boundaries run for 10 seconds of frames without losing agents', () => {
+  const page = loadPage({ seed: 1 });
+  page.load();
+  page.setCheckbox('flockWrap', false);
+  page.click('IS_PAUSED');
+  page.tick(1250);
+  assert.ok(page.flock.agents.every(finite));
+});
+
+test('wrap moves an agent that leaves one edge to the opposite edge', () => {
+  const page = loadPage({ width: 800, height: 600 });
+  page.elements.flockSizeRange.value = '1';
+  page.load();
+  const agent = page.flock.agents[0];
+  Object.assign(agent, { x: 2, y: 300, vx: -1, vy: 0 });
+  page.flock.DetectEdgeCollisions(agent);
+  assert.equal(agent.x, 800 - agent.radius);
+});
+
+test('turn mode pushes an agent back by the turn factor instead of moving it', () => {
+  const page = loadPage({ width: 800, height: 600 });
+  page.elements.flockSizeRange.value = '1';
+  page.load();
+  page.setCheckbox('flockWrap', false);
+  const agent = page.flock.agents[0];
+  Object.assign(agent, { x: 2, y: 300, vx: -1, vy: 0 });
+  page.flock.DetectEdgeCollisions(agent);
+  assert.equal(agent.x, 2);
+  assert.equal(agent.vx, -1 + 0.4);
+  assert.equal(agent.outBox, true);
+});
+
+test('alignment, cohesion, separation, bias and boundary sliders apply live', () => {
+  const page = loadPage();
+  page.load();
+  const settings = [
+    ['flockRangeSeperation', 0.25, 'seperation'],
+    ['flockRangeSeperationFactor', 0, 'seperationFactor'],
+    ['flockRangeAlignment', 0, 'alignment'],
+    ['flockRangeCohesion', 0.0025, 'cohesion'],
+    ['flockRangeBias', 100, 'bias'],
+    ['flockRangeTurn', 1, 'turnFactor'],
+    ['flockRangeBoxX', 50, 'box_x'],
+    ['flockRangeBoxY', 50, 'box_y'],
+  ];
+  for(const [id, value, key] of settings)
+  {
+    page.setSlider(id, value);
+    assert.equal(page.flock[key], value, id);
+  }
+});
+
+test('flock size, species and variance only take effect on Generate', () => {
+  const page = loadPage();
+  page.load();
+  page.setSlider('flockSizeRange', 10);
+  page.setSlider('flockRangeTribes', 5);
+  assert.equal(page.flock.agents.length, 50);
+  page.click('generateButton');
+  assert.equal(page.flock.agents.length, 10);
+  assert.equal(page.flock.raceCount, 5);
+});
+
+test('species become separate colours, and agents of a species share one', () => {
+  const page = loadPage({ seed: 3 });
+  page.elements.flockSizeRange.value = '200';
+  page.elements.flockRangeTribes.value = '1';
+  page.load();
+  assert.equal(new Set(page.flock.agents.map((a) => a.colour)).size, 1);
+});
+
+test('line shape draws each agent as a velocity line', () => {
+  const page = loadPage();
+  page.load();
+  page.elements.flockSizeShapeLine.checked = true;
+  page.elements.flockSizeShapeCircle.checked = false;
+  page.click('flockSizeShapeLine');
+  assert.equal(page.flock.shape, 'line');
+  page.calls.length = 0;
+  page.click('nextButton');
+  assert.ok(!page.calls.some(([name]) => name === 'arc'));
+});
+
+test('resizing the window resizes the canvas and the flock bounds', () => {
+  const page = loadPage({ width: 1280, height: 720 });
+  page.load();
+  page.resize(800, 600);
+  assert.deepEqual([page.elements.gameCanvas.width, page.elements.gameCanvas.height], [800, 600]);
+  assert.deepEqual([page.flock.width, page.flock.height], [800, 600]);
+});
+
+test('KNOWN DEFECT D1: min and max speed are truncated to whole numbers', () => {
+  const page = loadPage();
+  page.load();
+  // Sliders default to 0.5 and 2.5, read with parseInt.
+  assert.equal(page.flock.minSpeed, 0);
+  assert.equal(page.flock.maxSpeed, 2);
+  page.setSlider('flockRangeMaxSpeed', 0.8);
+  assert.equal(page.flock.maxSpeed, 0);
+  page.click('nextButton');
+  assert.ok(page.flock.agents.every((a) => speed(a) === 0), 'a max speed below 1 freezes the flock');
+});
+
+test('KNOWN DEFECT D2: the min speed clamp scales vy from the new vx', () => {
+  const page = loadPage();
+  page.elements.flockSizeRange.value = '1';
+  page.elements.flockRangeMinSpeed.value = '3';
+  page.elements.flockRangeMaxSpeed.value = '5';
+  page.load();
+  const agent = page.flock.agents[0];
+  Object.assign(agent, { vx: 0.3, vy: 0.4 });
+  page.flock.MovePosition(agent);
+  assert.ok(Math.abs(agent.vx - 1.8) < 1e-9);
+  assert.ok(Math.abs(agent.vy - 10.8) < 1e-9, 'vy should be 2.4');
+  assert.ok(speed(agent) > page.flock.maxSpeed);
+});
+
+test('KNOWN DEFECT D3: two close agents on the same x or y become NaN and vanish', () => {
+  const page = loadPage();
+  page.elements.flockSizeRange.value = '2';
+  page.load();
+  const [a, b] = page.flock.agents;
+  Object.assign(a, { x: 100, y: 100, vx: 1, vy: 1 });
+  Object.assign(b, { x: 100, y: 120, vx: 1, vy: 1 });
+  page.flock.Update();
+  assert.ok(!finite(a));
+});
+
+test('KNOWN DEFECT D3: a default 200-agent flock loses agents on its first frame (seed 2)', () => {
+  // Spawn positions are whole pixels, so equal coordinates are common.
+  const page = loadPage({ seed: 2 });
+  page.elements.flockSizeRange.value = '200';
+  page.load();
+  assert.ok(page.flock.agents.some((a) => !finite(a)));
+});
+
+test('KNOWN DEFECT D4: min speed above max speed wins over max speed', () => {
+  const page = loadPage({ seed: 1 });
+  page.elements.flockRangeMinSpeed.value = '9';
+  page.elements.flockRangeMaxSpeed.value = '2';
+  page.load();
+  page.click('nextButton');
+  assert.ok(page.flock.agents.some((a) => speed(a) > 2));
+});
+
+test('KNOWN DEFECT D5: variance has no effect on movement', () => {
+  const page = loadPage();
+  page.elements.flockRangeVariance.value = '100';
+  page.load();
+  const agent = page.flock.agents[0];
+  // Per-agent values are stored as strings and never read by Adjust().
+  assert.equal(typeof agent.seperation, 'string');
+  assert.equal(typeof agent.cohesion, 'string');
+  const source = page.flock.Adjust.toString();
+  assert.ok(!/agent\.(seperation|avoidance|cohesion)/.test(source));
+});
+
+test('KNOWN DEFECT D6: the nearby overlay shows half the real vision range', () => {
+  const page = loadPage();
+  page.load();
+  page.setCheckbox('flockNearby', true);
+  page.click('nextButton');
+  const agent = page.flock.agents[0];
+  // GetNearbyAgents accepts |dx| < vision, so the real square is 2 * vision wide.
+  const square = page.calls.find(([name, , , w]) => name === 'rect' && w === agent.vision);
+  assert.ok(square, 'overlay square is vision (120) wide, not 240');
+});
+
+test('KNOWN DEFECT D7: toggling an overlay or shape while paused does not redraw', () => {
+  const page = loadPage();
+  page.load();
+  page.calls.length = 0;
+  page.setCheckbox('flockNearby', true);
+  page.click('flockSizeShapeLine');
+  assert.equal(page.calls.length, 0);
+});
+
+test('KNOWN DEFECT D8: keyboard shortcuts leave the play/pause button out of sync', () => {
+  const page = loadPage();
+  page.load();
+  page.key('i');
+  assert.equal(page.timers.size, 1, 'running');
+  assert.equal(page.elements.IS_PAUSED.style.display, '', 'but the Play button is still shown');
+  page.click('IS_PAUSED');
+  assert.equal(page.timers.size, 0, 'so pressing Play pauses it');
+});
+
+test('KNOWN DEFECT D9: a boundary box wider than half the canvas pushes agents off screen', () => {
+  const page = loadPage({ width: 375, height: 667 });
+  page.load();
+  page.setSlider('flockRangeBoxX', 500);
+  page.click('nextButton');
+  // Every agent is wrapped to the same x = 375 - 5 - 500, left of the canvas,
+  // which also lines agents up for D3.
+  assert.ok(page.flock.agents.every((a) => !(a.x >= 0 && a.x <= 375)));
+});
