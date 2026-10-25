@@ -3,7 +3,8 @@
 // site); see "Asset base path" in docs/audit/BOIDS-V1-01.md.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'vite';
@@ -36,4 +37,17 @@ test('a fresh build matches the committed dist/', async (t) => {
   const committed = readdirSync(join(root, 'dist', 'assets')).sort();
   assert.deepEqual(readdirSync(join(outDir, 'assets')).sort(), committed);
   assert.equal(html, readFileSync(join(root, 'dist', 'index.html'), 'utf8'));
+});
+
+// .gitignore lists dist, so a rebuilt asset is only committed with git add -f.
+// Without this check a commit can point dist/index.html at a bundle that is on
+// disk but not in git, and the deployed page loads no script or stylesheet.
+test('every file in dist/ is tracked by git', (t) => {
+  if(!existsSync(join(root, '.git'))) return t.skip('not a git checkout');
+  const tracked = execFileSync('git', ['ls-files', '--', 'dist'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean);
+  const onDisk = readdirSync(join(root, 'dist'), { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice(root.length));
+  assert.deepEqual(onDisk.filter((path) => !tracked.includes(path)).sort(), []);
+  assert.deepEqual(tracked.filter((path) => !onDisk.includes(path)).sort(), []);
 });
