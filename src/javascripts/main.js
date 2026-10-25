@@ -71,6 +71,10 @@ class Flock
     this.closeBool = close;
 
     this.toggle = false;
+
+    // Source of every random draw in Start(). Tests replace it with a seeded
+    // or scripted source; the page always uses Math.random.
+    this.random = Math.random;
   }
 
 Start()
@@ -79,9 +83,9 @@ Start()
 
   for(let i = 0; i < this.raceCount; i++)
   {
-    let r = Math.floor(Math.random() * 255);
-    let g = Math.floor(Math.random() * 255);
-    let b = Math.floor(Math.random() * 255);
+    let r = Math.floor(this.random() * 255);
+    let g = Math.floor(this.random() * 255);
+    let b = Math.floor(this.random() * 255);
     let col = [r, g, b];
     races.push(col);
   }
@@ -90,12 +94,12 @@ Start()
 
   for(let i = 0; i < this.flockSize; i++)
   {
-    let startW = Math.floor(Math.random() * this.width);
-    let startH = Math.floor(Math.random() * this.height);
-    let startVW = Math.max(this.minSpeed, Math.random() * this.maxSpeed);
-    let startVH = Math.max(this.minSpeed, Math.random() * this.maxSpeed);
-    if(Math.random() > 0.5) startVW = -startVW;
-    if(Math.random() > 0.5) startVH = -startVH;
+    let startW = Math.floor(this.random() * this.width);
+    let startH = Math.floor(this.random() * this.height);
+    let startVW = Math.max(this.minSpeed, this.random() * this.maxSpeed);
+    let startVH = Math.max(this.minSpeed, this.random() * this.maxSpeed);
+    if(this.random() > 0.5) startVW = -startVW;
+    if(this.random() > 0.5) startVH = -startVH;
 
     let s = this.seperation;
 
@@ -105,8 +109,8 @@ Start()
       let max = parseFloat(document.getElementById("flockRangeSeperation").max);
       let range = max - min;
       let rV = (range / 100) * this.variance;
-      let change = Math.floor(Math.random() * (rV * 1000)) / 1000;
-      if(Math.random() > 0.5) s -= change;
+      let change = Math.floor(this.random() * (rV * 1000)) / 1000;
+      if(this.random() > 0.5) s -= change;
       else s += change;
       if(s < min) s = min;
       if(s > max) s = max;
@@ -122,8 +126,8 @@ Start()
       let max = parseFloat(document.getElementById("flockRangeAlignment").max);
       let range = max - min;
       let rV = (range / 100) * this.variance;
-      let change = Math.floor(Math.random() * (rV * 1000)) / 1000;
-      if(Math.random() > 0.5) a -= change;
+      let change = Math.floor(this.random() * (rV * 1000)) / 1000;
+      if(this.random() > 0.5) a -= change;
       else a += change;
       if(a < min) a = min;
       if(a > max) a = max;
@@ -139,8 +143,8 @@ Start()
       let max = parseFloat(document.getElementById("flockRangeCohesion").max);
       let range = max - min;
       let rV = (range / 100) * this.variance;
-      let change = Math.floor(Math.random() * (rV * 1000)) / 1000;
-      if(Math.random() > 0.5) c -= change;
+      let change = Math.floor(this.random() * (rV * 1000)) / 1000;
+      if(this.random() > 0.5) c -= change;
       else c += change;
       if(c < min) c = min;
       if(c > max) c = max;
@@ -148,7 +152,7 @@ Start()
 
     c = c.toFixed(5);
 
-    let r = Math.floor(Math.random() * races.length);
+    let r = Math.floor(this.random() * races.length);
     let newAgent = new FlockAgent(
       i, // index
       s, // seperation
