@@ -1,8 +1,11 @@
 // Reproducible benchmark scenarios for later optimisation (BOIDS-V1-03).
-// Each scenario is a seeded flock with fixed settings, stepped headlessly
-// through Flock.Update() (drawing goes to the recording canvas of
-// test/fixtures.js). `checksum` hashes the final state of every agent, so an
-// optimisation that is meant to keep behaviour must keep the checksum.
+// Each scenario is a seeded flock with fixed settings, stepped headlessly:
+// each frame is one Flock.Step() and one DrawFlock(), timed apart (drawing
+// goes to the recording canvas of test/fixtures.js, so msPerDraw is the cost
+// of issuing the calls, not of painting). `checksum` hashes the final state
+// of every agent, so an optimisation that is meant to keep behaviour must
+// keep the checksum. `cpuPerSecond` estimates the share of one core the page
+// uses while playing: 125 ticks and 60 draws a second (BOIDS-V1-06).
 //
 //   npm run bench                  all scenarios, default frame counts
 //   npm run bench -- dense-200     one scenario
@@ -26,19 +29,27 @@ export function runScenario(name, frames = SCENARIOS[name].frames)
   const { seed, settings } = SCENARIOS[name];
   const { calls, flock } = scene({ width: 1280, height: 720, random: seeded(seed), ...settings });
   flock.Start();
-  const start = performance.now();
+  let stepMs = 0;
+  let drawMs = 0;
   for(let i = 0; i < frames; i++)
   {
     calls.length = 0;
-    flock.Update();
+    const start = performance.now();
+    flock.Step();
+    const stepped = performance.now();
+    flock.DrawFlock(flock.shape);
+    stepMs += stepped - start;
+    drawMs += performance.now() - stepped;
   }
-  const ms = performance.now() - start;
   const state = new Float64Array(flock.agents.flatMap((a) => [a.x, a.y, a.vx, a.vy]));
   return {
     name,
     agents: flock.agents.length,
     frames,
-    msPerFrame: ms / frames,
+    msPerFrame: (stepMs + drawMs) / frames,
+    msPerTick: stepMs / frames,
+    msPerDraw: drawMs / frames,
+    cpuPerSecond: (125 * stepMs + 60 * drawMs) / frames / 1000,
     // Agents lost to NaN (D3) by the end; they still cost time every frame.
     lost: flock.agents.filter((a) => !finite(a)).length,
     checksum: createHash('sha256').update(state).digest('hex').slice(0, 16),
@@ -54,7 +65,9 @@ if(import.meta.url === pathToFileURL(process.argv[1]).href)
   const rows = names.map((name) => {
     if(!SCENARIOS[name]) throw new Error(`Unknown scenario ${name}. Known: ${Object.keys(SCENARIOS).join(', ')}`);
     const r = runScenario(name, frames);
-    return { ...r, msPerFrame: Number(r.msPerFrame.toFixed(3)) };
+    const round = (value) => Number(value.toFixed(3));
+    return { ...r, msPerFrame: round(r.msPerFrame), msPerTick: round(r.msPerTick), msPerDraw: round(r.msPerDraw),
+      cpuPerSecond: round(r.cpuPerSecond) };
   });
   console.table(rows);
 }

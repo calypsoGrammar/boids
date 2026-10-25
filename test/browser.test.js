@@ -146,6 +146,29 @@ for(const build of [false, true])
     assert.equal(count(close, 'rect', 'green'), 0);
   });
 
+  test(`${variant}: a high-DPI canvas keeps the flock and play state through a resize`, async (t) => {
+    const page = await open(t, { width: 1024, height: 600, devicePixelRatio: 2 });
+    const canvas = page.$('gameCanvas');
+    assert.deepEqual([canvas.width, canvas.height], [2048, 1200]);
+    assert.deepEqual([canvas.style.width, canvas.style.height], ['1024px', '600px']);
+    page.click('IS_PAUSED');
+    page.tick();
+    const arcs = (calls) => calls.filter((c) => c.name === 'arc').map((c) => c.args.slice(0, 2));
+    const before = arcs(lastFrame(page.calls));
+    const frame = page.frame(() => page.resize(800, 500));
+    assert.deepEqual([canvas.width, canvas.height], [1600, 1000]);
+    assert.deepEqual(frame.find((c) => c.name === 'setTransform').args, [2, 0, 0, 2, 0, 0]);
+    assert.deepEqual(frame.find((c) => c.name === 'clearRect').args, [0, 0, 800, 500]);
+    assert.deepEqual(arcs(frame), before, 'the agents stay where they were');
+    assert.equal(page.timers.size, 1, 'still playing');
+    assert.ok(!page.visible('IS_PAUSED') && page.visible('IS_PLAYING'));
+    assert.ok(!page.visible('statusMessage'));
+    page.resize(4, 4);
+    assert.ok(page.visible('statusMessage'));
+    assert.match(page.$('statusMessage').textContent, /too small/);
+    assert.deepEqual(page.errors, []);
+  });
+
   test(`${variant}: the boundary box follows the box sliders`, async (t) => {
     const page = await open(t, { width: 800, height: 600 });
     page.change('flockRangeBoxX', 100);

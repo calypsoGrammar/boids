@@ -4,7 +4,8 @@
 // behaviour so the fix ticket that corrects it has to update the test on
 // purpose; the defect ID matches the inventory in the audit document.
 // CAL-1285 (BOIDS-V1-04) fixed D1-D4 and D9; their tests now pin the fixed
-// behaviour (docs/audit/BOIDS-V1-04.md).
+// behaviour (docs/audit/BOIDS-V1-04.md), and CAL-1287 (BOIDS-V1-06) fixed D8
+// and D12 (docs/audit/BOIDS-V1-06.md).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPage } from './harness.js';
@@ -27,7 +28,7 @@ test('default settings generate a paused flock of 50 circles that fills the view
   assert.ok(page.calls.some(([name]) => name === 'arc'), 'first frame is drawn');
 });
 
-test('play, pause and step drive the 8 ms interval and swap the buttons', () => {
+test('play, pause and step drive the animation loop and swap the buttons', () => {
   const page = loadPage();
   page.load();
   page.click('IS_PAUSED');
@@ -278,14 +279,16 @@ test('KNOWN DEFECT D7: toggling an overlay or shape while paused does not redraw
   assert.equal(page.calls.length, 0);
 });
 
-test('KNOWN DEFECT D8: keyboard shortcuts leave the play/pause button out of sync', () => {
+test('D8: keyboard shortcuts keep the play/pause button in sync', () => {
   const page = loadPage();
   page.load();
   page.key('i');
   assert.equal(page.timers.size, 1, 'running');
-  assert.equal(page.elements.IS_PAUSED.style.display, '', 'but the Play button is still shown');
-  page.click('IS_PAUSED');
-  assert.equal(page.timers.size, 0, 'so pressing Play pauses it');
+  assert.equal(page.elements.IS_PAUSED.style.display, 'none', 'the Pause button is shown');
+  assert.equal(page.elements.IS_PLAYING.style.display, '');
+  page.key('p');
+  assert.equal(page.timers.size, 0, 'paused');
+  assert.equal(page.elements.IS_PAUSED.style.display, '', 'the Play button is shown');
 });
 
 test('D9: a boundary box wider than half the canvas keeps agents on screen', () => {

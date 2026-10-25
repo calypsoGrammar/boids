@@ -24,3 +24,5 @@ and the `KNOWN DEFECT` / `TARGET` naming.
 how they change the simulation.
 `docs/audit/BOIDS-V1-05.md` describes per-agent variance, species bias and
 which settings need Generate.
+`docs/audit/BOIDS-V1-06.md` covers the animation loop, the controls, high-DPI
+resizing, the status messages and the performance figures.
