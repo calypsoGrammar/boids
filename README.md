@@ -14,8 +14,16 @@ npm run audit:high   # fail on high or critical advisories
 npm run bench        # seeded simulation benchmarks
 ```
 
-`npm run build` writes the committed `dist/`. Commit the rebuilt files with
-any source change.
+`npm run build` writes the committed `dist/`, built for
+https://calypsogrammar.github.io/boids/. Commit the rebuilt files with any
+source change. `BASE_PATH=/` builds for the root of a host instead; never
+commit that build.
+
+## Release
+
+Every merge to `main` publishes `dist/` to GitHub Pages
+(`.github/workflows/pages.yml`). Pull requests only run checks. See
+`docs/release.md` for the Pages settings, the smoke checklist and rollback.
 
 Tests run with `node --test` and need no browser or network. See
 `docs/audit/BOIDS-V1-03.md` for the physics fixtures, the browser smoke tests
