@@ -4,10 +4,11 @@
 // status message. See docs/audit/BOIDS-V1-06.md.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { loadPage } from './harness.js';
 
-const main = readFileSync(new URL('../src/javascripts/main.js', import.meta.url), 'utf8');
+const dir = new URL('../src/javascripts/', import.meta.url);
+const sources = readdirSync(dir).map((file) => readFileSync(new URL(file, dir), 'utf8')).join('\n');
 // Array.from, so the copy is an array of this realm rather than the page's.
 const state = (page) => Array.from(page.flock.agents, ({ x, y, vx, vy, colour }) => ({ x, y, vx, vy, colour }));
 const playing = (page) => page.elements.IS_PAUSED.style.display === 'none' && page.elements.IS_PLAYING.style.display === '';
@@ -26,8 +27,8 @@ function twins(options)
   return { page, ticked };
 }
 
-test('main.js schedules only animation frames, never timers', () => {
-  assert.doesNotMatch(main, /setInterval|setTimeout/);
+test('the page schedules only animation frames, never timers', () => {
+  assert.doesNotMatch(sources, /setInterval|setTimeout/);
 });
 
 test('Play runs exactly one loop, however often it is pressed', () => {
@@ -273,4 +274,25 @@ test('an error in a frame stops the loop and shows a message until Generate', ()
   page.click('IS_PAUSED');
   page.tick(2);
   assert.equal(page.timers.size, 1);
+});
+
+test('settings changed while playing keep the one loop and apply from the next tick', () => {
+  const { page, ticked } = twins({ seed: 7 });
+  page.click('IS_PAUSED');
+  page.tick(3);
+  ticked(3);
+  const flock = page.flock;
+  page.setSlider('flockRangeAlignment', 0.2);
+  page.setSlider('flockRangeMaxSpeed', 1.5);
+  page.setCheckbox('flockNearby', true);
+  page.setSlider('flockSizeRange', 80);
+  assert.equal(page.flock, flock, 'no setting replaces the flock');
+  assert.equal(page.timers.size, 1, 'still one loop');
+  assert.ok(playing(page));
+  page.tick();
+  assert.equal(page.flock.agents.length, 50, 'the flock size waits for Generate');
+  assert.ok(page.calls.some(([name]) => name === 'fillText'), 'the overlay is drawn by the loop');
+  assert.ok(page.flock.agents.every((a) => Math.hypot(a.vx, a.vy) <= 1.5 + 1e-12), 'the new max speed holds');
+  // The twin kept the old settings, so its tick differs.
+  assert.notDeepEqual(state(page), ticked(1), 'the live settings changed the step');
 });

@@ -1,6 +1,6 @@
 // Reproducible benchmark scenarios for later optimisation (BOIDS-V1-03).
 // Each scenario is a seeded flock with fixed settings, stepped headlessly:
-// each frame is one Flock.Step() and one DrawFlock(), timed apart (drawing
+// each frame is one Flock.Step() and one drawFlock(), timed apart (drawing
 // goes to the recording canvas of test/fixtures.js, so msPerDraw is the cost
 // of issuing the calls, not of painting). `checksum` hashes the final state
 // of every agent, so an optimisation that is meant to keep behaviour must
@@ -27,7 +27,7 @@ export const SCENARIOS = {
 export function runScenario(name, frames = SCENARIOS[name].frames)
 {
   const { seed, settings } = SCENARIOS[name];
-  const { calls, flock } = scene({ width: 1280, height: 720, random: seeded(seed), ...settings });
+  const { calls, flock, draw } = scene({ width: 1280, height: 720, random: seeded(seed), ...settings });
   flock.Start();
   let stepMs = 0;
   let drawMs = 0;
@@ -37,7 +37,7 @@ export function runScenario(name, frames = SCENARIOS[name].frames)
     const start = performance.now();
     flock.Step();
     const stepped = performance.now();
-    flock.DrawFlock(flock.shape);
+    draw();
     stepMs += stepped - start;
     drawMs += performance.now() - stepped;
   }

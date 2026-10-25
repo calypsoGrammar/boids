@@ -5,9 +5,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { PARAMETERS } from '../src/javascripts/settings.js';
 import { openPage } from './browser.js';
 
-const main = readFileSync(new URL('../src/javascripts/main.js', import.meta.url), 'utf8');
+const controller = readFileSync(new URL('../src/javascripts/controller.js', import.meta.url), 'utf8');
+// Every element id the page looks up: those the controller names, and the
+// controls of every parameter in the settings model.
+const ids = [
+  ...[...controller.matchAll(/\$\(\s*["'](\w+)["']\s*\)/g)].map((m) => m[1]),
+  ...PARAMETERS.flatMap((p) => [p.range, p.text, p.checkbox, ...Object.values(p.radios ?? {})]).filter(Boolean),
+];
 // Counts calls to `name`, optionally only those drawn in `style` (the fill
 // style for fill and fillText, otherwise the stroke style).
 const count = (calls, name, style) => calls.filter((c) => c.name === name
@@ -24,9 +31,8 @@ for(const build of [false, true])
     return page;
   };
 
-  test(`${variant}: every element main.js looks up is in the markup`, async (t) => {
+  test(`${variant}: every element the page looks up is in the markup`, async (t) => {
     const page = await open(t);
-    const ids = [...main.matchAll(/getElementById\(\s*["'](\w+)["']\s*\)/g)].map((m) => m[1]);
     assert.ok(ids.length > 30);
     assert.deepEqual(ids.filter((id) => !page.$(id)), []);
     assert.equal(page.window.document.getElementsByClassName('startButton').length, 2);
@@ -112,20 +118,24 @@ for(const build of [false, true])
     assert.deepEqual(page.errors, []);
   });
 
-  test(`${variant}: line and circle shapes, and the direction line`, async (t) => {
+  test(`${variant}: line and circle shapes, and the optional direction line`, async (t) => {
     const page = await open(t);
-    page.change('flockSizeShapeLine', true);
-    page.click('flockSizeShapeLine');
-    const line = page.frame(() => page.click('nextButton'));
-    assert.equal(count(line, 'arc'), 0);
-    // A velocity line plus the always-on direction line per agent.
-    assert.equal(count(line, 'lineTo'), 100);
+    const line = page.frame(() => page.change('flockSizeShapeLine', true));
+    assert.equal(count(line, 'arc'), 0, 'a paused flock is redrawn as lines at once');
+    // One velocity line per agent, and no direction line by default.
+    assert.equal(count(line, 'lineTo'), 50);
+
+    const both = page.frame(() => page.change('flockDirection', true));
+    assert.equal(count(both, 'lineTo'), 100, 'plus a direction line per agent');
 
     page.change('flockSizeShapeCircle', true);
-    page.click('flockSizeShapeCircle');
     const circle = page.frame(() => page.click('nextButton'));
     assert.equal(count(circle, 'arc'), 50);
     assert.equal(count(circle, 'lineTo'), 50);
+    page.change('flockDirection', false);
+    const plain = page.frame(() => page.click('nextButton'));
+    assert.equal(count(plain, 'lineTo'), 0);
+    assert.deepEqual(page.errors, []);
   });
 
   test(`${variant}: the nearby and close debug overlays`, async (t) => {

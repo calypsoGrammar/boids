@@ -103,10 +103,7 @@
         <label for="flockRangeSeperation" class="w-28 m-2">Seperation:</label>
         <div class="m-2 p-2 flex flex-row justify-center items-center">
           <input type="range" id="flockRangeSeperation"
-          min="0.00" max="0.25" step="0.01" value="0.10"
-          onchange="UpdateSlider(4,
-          flockRangeSeperation.value,
-          flockInputSeperation);" class="m-2">
+          min="0.00" max="0.25" step="0.01" value="0.10" class="m-2">
           <input type="number" id="flockInputSeperation" readonly class="w-24 m-2" value="0.10">
         </div>
       </div>
@@ -205,6 +202,11 @@
       <div class="m-2 flex flex-row justify-center items-center">
         <label for="flockClose" class="m-2 w-28">Show Close:</label>
         <input type="checkbox" id="flockClose" class="m-2">
+      </div>
+
+      <div class="m-2 flex flex-row justify-center items-center">
+        <label for="flockDirection" class="m-2 w-28">Show Direction:</label>
+        <input type="checkbox" id="flockDirection" class="m-2">
       </div>
     
       <div id="generate" class="m-2 flex flex-col items-center">

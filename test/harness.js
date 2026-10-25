@@ -1,15 +1,16 @@
-// Loads src/javascripts/main.js headlessly against a minimal fake DOM so the
-// simulation can be stepped in Node without a browser. The page's Alpine
-// import is stripped; main.js does not use any Alpine directives.
+// Runs the page controller (src/javascripts/controller.js) headlessly against
+// a minimal fake DOM, so the whole page can be driven in Node without a
+// browser. The inputs and their defaults and limits come from index.html;
+// the flock draws from a seeded random source, so runs are reproducible.
 import { readFileSync } from 'node:fs';
-import vm from 'node:vm';
+import { createApp } from '../src/javascripts/controller.js';
+import { seeded } from './random.js';
 
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const source = readFileSync(new URL('../src/javascripts/main.js', import.meta.url), 'utf8');
 
 // Read every <input> in index.html so the harness starts from the real
 // default values and slider limits.
-function parseInputs()
+export function parseInputs()
 {
   const inputs = {};
   for(const tag of html.match(/<input[^>]*>/g))
@@ -17,6 +18,7 @@ function parseInputs()
     const attr = (name) => (tag.match(new RegExp('\\s' + name + '="([^"]*)"')) || [])[1];
     inputs[attr('id')] = {
       type: attr('type'),
+      name: attr('name'),
       value: attr('value') ?? '',
       min: attr('min'),
       max: attr('max'),
@@ -28,22 +30,10 @@ function parseInputs()
 
 function fakeContext(calls)
 {
-  const record = (name) => (...args) => calls.push([name, ...args]);
-  return {
-    strokeStyle: '#000000',
-    fillStyle: '#000000',
-    lineWidth: 1,
-    clearRect: record('clearRect'),
-    beginPath: record('beginPath'),
-    rect: record('rect'),
-    stroke: record('stroke'),
-    moveTo: record('moveTo'),
-    lineTo: record('lineTo'),
-    arc: record('arc'),
-    fill: record('fill'),
-    fillText: record('fillText'),
-    setTransform: record('setTransform'),
-  };
+  const ctx = { strokeStyle: '#000000', fillStyle: '#000000', lineWidth: 1 };
+  for(const name of ['clearRect', 'beginPath', 'rect', 'stroke', 'moveTo', 'lineTo', 'arc', 'fill', 'fillText', 'setTransform'])
+    ctx[name] = (...args) => calls.push([name, ...args]);
+  return ctx;
 }
 
 export function loadPage({ width = 1280, height = 720, devicePixelRatio = 1, seed = 1 } = {})
@@ -56,64 +46,42 @@ export function loadPage({ width = 1280, height = 720, devicePixelRatio = 1, see
   for(const [id, props] of Object.entries(parseInputs())) element(id, props);
   const ctx = fakeContext(calls);
   element('gameCanvas', { width: 300, height: 150, getContext: () => ctx });
-  // ReSize() reads the container's scroll size, which tracks the viewport.
-  Object.defineProperties(element('gameContainer'), {
-    scrollWidth: { get: () => window.innerWidth },
-    scrollHeight: { get: () => window.innerHeight },
-  });
   element('settingsMenu', { style: { display: 'none' } });
   element('statusMessage', { style: { display: 'none' }, textContent: '' });
+  element('generatePending', { style: { display: 'none' } });
   element('IS_PLAYING', { style: { display: 'none' } });
 
-  const startButtons = [element('IS_PAUSED'), elements.IS_PLAYING];
+  // Pending requestAnimationFrame callbacks, and the frame clock in ms.
+  // The page gets no setInterval or setTimeout, so it cannot leave one running.
+  const timers = new Map();
+  let nextTimer = 1;
+  let now = 1000;
   const on = (target) => (type, fn) => (listeners[target + ':' + type] ??= []).push(fn);
-  const window = { innerWidth: width, innerHeight: height, devicePixelRatio, addEventListener: on('window') };
+  const window = {
+    innerWidth: width,
+    innerHeight: height,
+    devicePixelRatio,
+    addEventListener: on('window'),
+    requestAnimationFrame: (fn) => { timers.set(nextTimer, fn); return nextTimer++; },
+    cancelAnimationFrame: (id) => timers.delete(id),
+  };
   const document = {
-    documentElement: { style: { setProperty() {} } },
     getElementById: (id) => element(id),
-    getElementsByClassName: (name) => (name === 'startButton' ? startButtons : []),
     addEventListener: on('document'),
     onkeydown: null,
   };
 
-  // Deterministic Math.random (mulberry32) so runs are reproducible.
-  let state = seed >>> 0;
-  const random = () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  const math = Object.create(Math);
-  math.random = random;
-
-  // Pending requestAnimationFrame callbacks, and the frame clock in ms.
-  // main.js gets no setInterval or setTimeout, so it cannot leave one running.
-  const timers = new Map();
-  let nextTimer = 1;
-  let now = 1000;
-  const context = vm.createContext({
-    window,
-    document,
-    Math: math,
-    requestAnimationFrame: (fn) => { timers.set(nextTimer, fn); return nextTimer++; },
-    cancelAnimationFrame: (id) => timers.delete(id),
-  });
-
-  const script = source.replace(/^import Alpine.*$/m, '').replace(/^window\.Alpine.*$/m, '').replace(/^Alpine\.start\(\).*$/m, '');
-  vm.runInContext(script, context);
+  const app = createApp({ window, document, random: seeded(seed) });
 
   const fire = (key) => (listeners[key] ?? []).forEach((fn) => fn());
   const page = {
+    app,
     elements,
     calls,
     window,
     timers,
-    // Top-level bindings of main.js live in the context's global lexical scope.
-    eval: (code) => vm.runInContext(code, context),
-    get flock() { return page.eval('flock'); },
-    load() { fire('window:DOMContentLoaded'); fire('document:DOMContentLoaded'); },
+    get flock() { return app.flock; },
+    load() { fire('document:DOMContentLoaded'); },
     resize(w, h) { window.innerWidth = w; window.innerHeight = h; fire('window:resize'); },
     // Runs one display frame `ms` after the last: the pending
     // requestAnimationFrame callbacks, as the browser would. Only the draw
@@ -129,7 +97,16 @@ export function loadPage({ width = 1280, height = 720, devicePixelRatio = 1, see
     // Runs n frames of one 8 ms tick each.
     tick(n = 1) { for(let i = 0; i < n; i++) page.frame(8); },
     setSlider(id, value) { elements[id].value = String(value); elements[id].onchange(); },
-    setCheckbox(id, checked) { elements[id].checked = checked; elements[id].onchange(); },
+    // Checks or unchecks a checkbox, or selects a radio button (unchecking
+    // the others of its group), as a click would.
+    setCheckbox(id, checked)
+    {
+      const input = elements[id];
+      if(input.type === 'radio')
+        for(const other of Object.values(elements)) if(other.name === input.name) other.checked = false;
+      input.checked = checked;
+      input.onchange();
+    },
     click(id) { elements[id].onclick(); },
     key(key, modifiers = {}) { document.onkeydown({ key, ...modifiers }); },
   };
