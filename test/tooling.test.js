@@ -5,13 +5,13 @@
 // test/build.test.js keeps identical to a fresh build.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const root = new URL('..', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
 const html = read('index.html');
-const main = read('src/javascripts/main.js');
+const main = readdirSync(new URL('src/javascripts/', root)).map((file) => read('src/javascripts/' + file)).join('\n');
 const pkg = JSON.parse(read('package.json'));
 const built = read('dist/index.html');
 const asset = (ext) => read('dist' + built.match(new RegExp(`"/boids(/assets/index-[\\w-]+\\.${ext})"`))[1]);
@@ -33,7 +33,7 @@ test('Tailwind scans every file that sets classes', () => {
   const require = createRequire(import.meta.url);
   const config = require('../tailwind.config.cjs');
   assert.deepEqual(config.content, ['./index.html']);
-  // main.js only toggles inline styles; classes come from index.html alone.
+  // The scripts only toggle inline styles; classes come from index.html alone.
   assert.doesNotMatch(main, /className|classList|setAttribute\(\s*['"]class|innerHTML|insertAdjacentHTML/);
 });
 

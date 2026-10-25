@@ -5,7 +5,8 @@
 // purpose; the defect ID matches the inventory in the audit document.
 // CAL-1285 (BOIDS-V1-04) fixed D1-D4 and D9; their tests now pin the fixed
 // behaviour (docs/audit/BOIDS-V1-04.md), and CAL-1287 (BOIDS-V1-06) fixed D8
-// and D12 (docs/audit/BOIDS-V1-06.md).
+// and D12 (docs/audit/BOIDS-V1-06.md). CAL-1288 (BOIDS-V1-07) fixed D6 and D7
+// (docs/audit/BOIDS-V1-07.md).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPage } from './harness.js';
@@ -18,7 +19,7 @@ test('default settings generate a paused flock of 50 circles that fills the view
   page.load();
   const flock = page.flock;
   assert.equal(flock.agents.length, 50);
-  assert.equal(flock.shape, 'circle');
+  assert.equal(page.app.config.shape, 'circle');
   assert.equal(flock.raceCount, 2);
   assert.equal(flock.wrap, true);
   assert.deepEqual([flock.width, flock.height], [1280, 720]);
@@ -105,8 +106,8 @@ test('alignment, cohesion, separation, bias and boundary sliders apply live', ()
     ['flockRangeCohesion', 0.0025, 'cohesion'],
     ['flockRangeBias', 100, 'bias'],
     ['flockRangeTurn', 1, 'turnFactor'],
-    ['flockRangeBoxX', 50, 'box_x'],
-    ['flockRangeBoxY', 50, 'box_y'],
+    ['flockRangeBoxX', 50, 'boxX'],
+    ['flockRangeBoxY', 50, 'boxY'],
   ];
   for(const [id, value, key] of settings)
   {
@@ -152,10 +153,8 @@ test('species become separate colours, and agents of a species share one', () =>
 test('line shape draws each agent as a velocity line', () => {
   const page = loadPage();
   page.load();
-  page.elements.flockSizeShapeLine.checked = true;
-  page.elements.flockSizeShapeCircle.checked = false;
-  page.click('flockSizeShapeLine');
-  assert.equal(page.flock.shape, 'line');
+  page.setCheckbox('flockSizeShapeLine', true);
+  assert.equal(page.app.config.shape, 'line');
   page.calls.length = 0;
   page.click('nextButton');
   assert.ok(!page.calls.some(([name]) => name === 'arc'));
@@ -205,7 +204,7 @@ test('D3: two close agents on the same x or y stay finite', () => {
   const [a, b] = page.flock.agents;
   Object.assign(a, { x: 100, y: 100, vx: 1, vy: 1 });
   Object.assign(b, { x: 100, y: 120, vx: 1, vy: 1 });
-  page.flock.Update();
+  page.flock.Step();
   assert.ok(finite(a) && finite(b));
 });
 
@@ -259,24 +258,31 @@ test('D5: variance gives agents their own numeric coefficients', () => {
   }
 });
 
-test('KNOWN DEFECT D6: the nearby overlay shows half the real vision range', () => {
+test('D6: the nearby and close overlays cover the squares the neighbour search uses', () => {
   const page = loadPage();
   page.load();
   page.setCheckbox('flockNearby', true);
+  page.setCheckbox('flockClose', true);
   page.click('nextButton');
   const agent = page.flock.agents[0];
-  // GetNearbyAgents accepts |dx| < vision, so the real square is 2 * vision wide.
-  const square = page.calls.find(([name, , , w]) => name === 'rect' && w === agent.vision);
-  assert.ok(square, 'overlay square is vision (120) wide, not 240');
+  // GetNearbyAgents accepts |dx| < vision, so the square is 2 * vision wide.
+  const rects = page.calls.filter(([name]) => name === 'rect');
+  assert.ok(rects.some((call) => call.join() === ['rect', agent.x - 120, agent.y - 120, 240, 240].join()));
+  assert.ok(rects.some((call) => call.join() === ['rect', agent.x - 40, agent.y - 40, 80, 80].join()));
+  assert.ok(!rects.some(([, , , w]) => w === 120 || w === 40), 'no half-size squares');
 });
 
-test('KNOWN DEFECT D7: toggling an overlay or shape while paused does not redraw', () => {
+test('D7: toggling an overlay or shape while paused redraws at once', () => {
   const page = loadPage();
   page.load();
   page.calls.length = 0;
   page.setCheckbox('flockNearby', true);
-  page.click('flockSizeShapeLine');
-  assert.equal(page.calls.length, 0);
+  assert.ok(page.calls.some(([name]) => name === 'fillText'), 'the overlay is drawn');
+  page.calls.length = 0;
+  page.setCheckbox('flockSizeShapeLine', true);
+  assert.ok(page.calls.some(([name]) => name === 'clearRect'));
+  assert.ok(!page.calls.some(([name]) => name === 'arc'), 'as lines');
+  assert.equal(page.timers.size, 0, 'and it stays paused');
 });
 
 test('D8: keyboard shortcuts keep the play/pause button in sync', () => {
@@ -298,7 +304,7 @@ test('D9: a boundary box wider than half the canvas keeps agents on screen', () 
   for(let i = 0; i < 100; i++) page.click('nextButton');
   // The inset is capped at 375 / 2 - 10, leaving a 10 px wide box.
   assert.ok(page.flock.agents.every((a) => finite(a) && a.x >= 180 && a.x <= 195));
-  assert.equal(page.flock.box_x, 500, 'the setting itself is kept for a larger window');
+  assert.equal(page.flock.boxX, 500, 'the setting itself is kept for a larger window');
   page.resize(1280, 720);
   page.setCheckbox('flockWrap', false);
   for(let i = 0; i < 100; i++) page.click('nextButton');

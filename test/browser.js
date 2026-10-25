@@ -1,15 +1,36 @@
 // Opens the real page in jsdom, as a browser smoke test without a browser
 // download. Unlike test/harness.js, the elements come from parsing the actual
 // markup, so a renamed id or a broken handler fails here. `build: true` opens
-// dist/index.html with the built bundle instead of index.html with the
-// source. jsdom has no canvas, so the 2D context records its calls, and timers
+// the committed dist/index.html with its bundle; otherwise the current source
+// is bundled in memory by Vite, as `npm run build` would, and that page is
+// opened. jsdom has no canvas, so the 2D context records its calls, and
 // requestAnimationFrame and Math.random are replaced to keep every run the
 // same.
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { seeded } from './fixtures.js';
+import { build as viteBuild } from 'vite';
+import { seeded } from './random.js';
 
-const read = (path) => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
+const root = new URL('..', import.meta.url);
+const read = (path) => readFileSync(new URL(path, root), 'utf8');
+
+// The page and its script, built from source once per test file.
+let source = null;
+function fromSource()
+{
+  source ??= viteBuild({ root: root.pathname, logLevel: 'silent', build: { write: false } }).then((result) => {
+    const { output } = Array.isArray(result) ? result[0] : result;
+    const file = (name) => output.find((f) => f.fileName === name);
+    return { html: file('index.html').source, code: (name) => file(name).code };
+  });
+  return source;
+}
+
+async function page(build)
+{
+  if(build) return { html: read('dist/index.html'), code: (name) => read('dist/' + name) };
+  return fromSource();
+}
 
 function recordingContext(calls)
 {
@@ -21,13 +42,14 @@ function recordingContext(calls)
 
 export async function openPage({ build = false, width = 1280, height = 720, devicePixelRatio = 1, seed = 1 } = {})
 {
-  let html = read(build ? 'dist/index.html' : 'index.html');
+  const files = await page(build);
+  let html = files.html;
   // jsdom does not run module scripts, so the one module script becomes a
   // classic script at the end of <body>. That runs before DOMContentLoaded,
   // like a deferred module.
   const tag = /<script type=['"]module['"][^>]*\ssrc="([^"]+)"[^>]*><\/script>/;
   const src = html.match(tag)[1];
-  const code = build ? read('dist' + src.replace(/^\/boids/, '')) : read(src.replace(/^\.\//, ''));
+  const code = files.code(src.replace(/^\/boids\//, ''));
   html = html.replace(tag, '').replace('</body>', () => `<script>${code}</script></body>`);
 
   const calls = [];
