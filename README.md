@@ -22,3 +22,5 @@ Tests run with `node --test` and need no browser or network. See
 and the `KNOWN DEFECT` / `TARGET` naming.
 `docs/audit/BOIDS-V1-04.md` lists the speed, separation and edge fixes and
 how they change the simulation.
+`docs/audit/BOIDS-V1-05.md` describes per-agent variance, species bias and
+which settings need Generate.
