@@ -67,7 +67,7 @@ function compile()
 {
   const calls = [];
   const ctx = { strokeStyle: '#000000', fillStyle: '#000000', lineWidth: 1 };
-  for(const name of ['clearRect', 'beginPath', 'rect', 'stroke', 'moveTo', 'lineTo', 'arc', 'fill', 'fillText'])
+  for(const name of ['clearRect', 'beginPath', 'rect', 'stroke', 'moveTo', 'lineTo', 'arc', 'fill', 'fillText', 'setTransform'])
     ctx[name] = (...args) => calls.push([name, ...args]);
   const elements = {};
   const element = (id) => (elements[id] ??= { ...inputs[id], id, style: {}, getContext: () => ctx });
@@ -79,7 +79,7 @@ function compile()
     getElementsByClassName: () => [],
     addEventListener: noop,
   };
-  const load = new Function('window', 'document', 'setInterval', 'clearInterval',
+  const load = new Function('window', 'document', 'requestAnimationFrame', 'cancelAnimationFrame',
     source + '\nreturn { Flock, FlockAgent };');
   return { ...load(window, document, noop, noop), calls };
 }

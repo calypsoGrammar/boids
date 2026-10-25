@@ -13,7 +13,18 @@ window.addEventListener('orientationchange', CalculateVh);
 // Speeds used when a setting is not a number: the index.html defaults.
 const DEFAULT_MIN_SPEED = 0.5;
 const DEFAULT_MAX_SPEED = 2.5;
+const DEFAULT_FLOCK_SIZE = 50;
 const AGENT_RADIUS = 5;
+// The simulation advances in fixed ticks of this many ms (125 per second, the
+// rate of the old 8 ms interval), however often the screen refreshes.
+const TICK_MS = 8;
+// At most this many ticks are run to catch up in one frame. Time beyond that
+// (a background tab, a slow frame) is dropped, so the simulation slows down
+// instead of piling up work.
+const MAX_TICKS_PER_FRAME = 8;
+// A canvas smaller than one agent across, on either axis, has no room to
+// simulate in: the flock stops moving until the window is larger again.
+const MIN_VIEW_SIZE = 2 * AGENT_RADIUS;
 // Separation treats neighbours closer than this (px) as this far away, so the
 // push stays finite when two agents overlap.
 const MIN_SEPARATION_DISTANCE = 1;
@@ -55,7 +66,6 @@ class Flock
     nearby,
     close,
 
-    toggle,
     )
   {
     this.flockSize = flockSize;
@@ -78,7 +88,6 @@ class Flock
     this.shape = shape;
 
     this.agents = [];
-    this.iterator = undefined;
 
     this.box_x = boxX;
     this.box_y = boxY;
@@ -86,8 +95,6 @@ class Flock
 
     this.nearbyBool = nearby;
     this.closeBool = close;
-
-    this.toggle = false;
 
     // [min, max] of each coefficient in COEFFICIENTS. Start() reads them from
     // the sliders; an agent's coefficient never leaves them.
@@ -207,34 +214,6 @@ SpeciesDivisor()
   return Number.isFinite(this.bias) && this.bias > 1 ? this.bias : 1;
 }
 
-Iterate()
-{
-  clearInterval(this.iterator);
-  this.iterator = setInterval(() => {
-    this.Update();
-  }, 8);
-}
-
-Pause()
-{
-  clearInterval(this.iterator);
-  this.iterator = null;
-}
-
-Toggle()
-{
-  if(this.iterator === null || this.iterator === undefined)
-  {
-    this.Iterate();
-    this.toggle = true;
-  }
-  else
-  {
-    this.Pause();
-    this.toggle = false;
-  }
-}
-
 // Makes the speed limits and box insets usable: finite, not negative, and
 // minSpeed no higher than maxSpeed (maxSpeed is the hard limit, so a min
 // above it is lowered to it). Runs before every step.
@@ -248,15 +227,29 @@ Validate()
   this.box_y = Number.isFinite(this.box_y) ? Math.max(0, this.box_y) : 0;
 }
 
-// One tick. Every agent finds its neighbours and steers from the state at the
-// start of the tick, then all of them move, so the result does not depend on
-// the order of the agents.
+// One tick and a redraw.
 Update()
+{
+  this.Step();
+  this.DrawFlock(this.shape);
+}
+
+// One tick, without drawing. Every agent finds its neighbours and steers from
+// the state at the start of the tick, then all of them move, so the result
+// does not depend on the order of the agents.
+Step()
 {
   this.Validate();
   let len = this.agents.length;
-  let steerX = new Float64Array(len);
-  let steerY = new Float64Array(len);
+  // The steering buffers are kept between ticks rather than allocated each
+  // time.
+  if(this.steerX === undefined || this.steerX.length !== len)
+  {
+    this.steerX = new Float64Array(len);
+    this.steerY = new Float64Array(len);
+  }
+  let steerX = this.steerX;
+  let steerY = this.steerY;
   for(let i = 0; i < len; i++)
   {
     this.agents[i].outBox = false;
@@ -272,29 +265,33 @@ Update()
     this.DetectEdgeCollisions(this.agents[i]);
     this.MovePosition(this.agents[i]);
   }
-  this.DrawFlock(this.shape);
 }
 
 GetNearbyAgents(agent, length)
 {
   if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
-  let context = [];
-  let closeContext = [];
+  // The agent's lists are refilled in place, so a tick allocates no arrays.
+  let context = agent.nearby;
+  let closeContext = agent.close;
+  context.length = 0;
+  closeContext.length = 0;
   let range = agent.vision;
   let tooClose = agent.closeVision;
+  let x = agent.x;
+  let y = agent.y;
   for(let i = 0; i < length; i++)
   {
     if(i == agent.index) continue;
-    let xDif = Math.abs(agent.x - this.agents[i].x);
-    let yDif = Math.abs(agent.y - this.agents[i].y);
-    if(xDif < range && yDif < range)
+    let other = this.agents[i];
+    let xDif = Math.abs(x - other.x);
+    if(xDif >= range) continue;
+    let yDif = Math.abs(y - other.y);
+    if(yDif < range)
     {
       context.push(i);
       if(xDif < tooClose && yDif < tooClose) closeContext.push(i);
     }
   }
-  agent.nearby = context;
-  agent.close = closeContext;
 }
 
 Adjust(agent)
@@ -352,8 +349,9 @@ Steer(agent)
         avoidY += yDif * scale;
       }
 
-      newX += avoidX * this.Coefficient(agent, "seperation");
-      newY += avoidY * this.Coefficient(agent, "seperation");
+      let seperation = this.Coefficient(agent, "seperation");
+      newX += avoidX * seperation;
+      newY += avoidY * seperation;
     }
   }
 
@@ -373,8 +371,9 @@ Steer(agent)
       weight += 1 / d;
     }
 
-    newX += ( alignX / weight - agent.vx ) * this.Coefficient(agent, "alignment");
-    newY += ( alignY / weight - agent.vy ) * this.Coefficient(agent, "alignment");
+    let alignment = this.Coefficient(agent, "alignment");
+    newX += ( alignX / weight - agent.vx ) * alignment;
+    newY += ( alignY / weight - agent.vy ) * alignment;
   }
 
   // COHESION
@@ -393,8 +392,9 @@ Steer(agent)
       weight += 1 / d;
     }
 
-    newX += ( cohereX / weight - agent.x ) * this.Coefficient(agent, "cohesion");
-    newY += ( cohereY / weight - agent.y ) * this.Coefficient(agent, "cohesion");
+    let cohesion = this.Coefficient(agent, "cohesion");
+    newX += ( cohereX / weight - agent.x ) * cohesion;
+    newY += ( cohereY / weight - agent.y ) * cohesion;
   }
   return [newX, newY];
 }
@@ -600,19 +600,83 @@ class FlockAgent
   }
 }
 
-const startButton = document.getElementsByClassName("startButton");
-for(let i = 0; i < startButton.length; i++)
+// The one animation loop of the page. While playing, each display frame runs
+// the ticks that are due at TICK_MS each (at most MAX_TICKS_PER_FRAME), then
+// draws once. Play while playing and Pause while paused do nothing, so there
+// is never more than one frame request pending.
+class Loop
 {
-  startButton[i].onclick = function(){ RestartFlock() };
+  constructor(tick, draw, fail)
+  {
+    this.tick = tick;
+    this.draw = draw;
+    this.fail = fail;
+    this.frame = null;
+    this.last = null;
+    this.lag = 0;
+    this.run = (now) => this.Frame(now);
+  }
+
+  get running()
+  {
+    return this.frame !== null;
+  }
+
+  Play()
+  {
+    if(this.running) return;
+    // The first frame runs one tick at once, whatever its time stamp.
+    this.last = null;
+    this.lag = 0;
+    this.frame = requestAnimationFrame(this.run);
+  }
+
+  Pause()
+  {
+    if(!this.running) return;
+    cancelAnimationFrame(this.frame);
+    this.frame = null;
+  }
+
+  Frame(now)
+  {
+    this.frame = requestAnimationFrame(this.run);
+    let elapsed = this.last === null ? TICK_MS : now - this.last;
+    this.last = now;
+    this.lag = Math.min(this.lag + Math.max(0, elapsed), MAX_TICKS_PER_FRAME * TICK_MS);
+    if(this.lag < TICK_MS) return;
+    try
+    {
+      while(this.lag >= TICK_MS)
+      {
+        this.tick();
+        this.lag -= TICK_MS;
+      }
+      this.draw();
+    }
+    catch(error)
+    {
+      this.Pause();
+      this.fail(error);
+    }
+  }
 }
 
+const loop = new Loop(
+  () => { if(ViewValid()) flock.Step(); },
+  () => flock.DrawFlock(flock.shape),
+  (error) => {
+    ShowPlaying(false);
+    notices.error = "The simulation stopped after an error (" + error.message + "). Press Generate to start again.";
+    ShowStatus();
+  },
+);
+
+document.getElementById("IS_PAUSED").onclick = function(){ Play() };
+document.getElementById("IS_PLAYING").onclick = function(){ Pause() };
+
 const nextButton = document.getElementById("nextButton");
-nextButton.onclick = function(){
-  flock.Pause();
-  flock.Update();
-  document.getElementById('IS_PAUSED').style.display = '';
-  document.getElementById('IS_PLAYING').style.display = 'none';
-};
+nextButton.onclick = function(){ StepOnce() };
 
 const optionsButton = document.getElementById("optionsButton");
 optionsButton.onclick = function(){ Settings() };
@@ -734,25 +798,26 @@ const generatePending = document.getElementById("generatePending");
 const generateButton = document.getElementById("generateButton");
 generateButton.onclick = function(){ Main(); };
 
-const gameContainer = document.getElementById("gameContainer");
-const gameDiv = document.getElementById("gameDiv");
 const gameCanvas = document.getElementById("gameCanvas");
 const c = gameCanvas.getContext("2d");
+const statusMessage = document.getElementById("statusMessage");
 
 let flock = null;
+// The canvas size in CSS pixels, which the flock moves in. ReSize() sets it.
+const view = { width: 0, height: 0 };
+// The messages statusMessage shows, by cause; "" when there is none.
+const notices = { viewport: "", input: "", error: "" };
 
 function Main()
 {
+  // Generate replaces the flock, so the loop that stepped the old one stops.
+  Pause();
+  notices.error = "";
   ReSize();
-
-  let w = parseInt(gameCanvas.width);
-  let h = parseInt(gameCanvas.height);
-
-  if(flock !== null) flock.Pause();
 
   let shape = ChangeShape();
 
-  let flockSize = parseInt(document.getElementById("flockSizeRange").value);
+  let flockSize = FlockSize();
   let minSpeed = parseFloat(document.getElementById("flockRangeMinSpeed").value);
   let maxSpeed = parseFloat(document.getElementById("flockRangeMaxSpeed").value);
   let seperation = parseFloat(document.getElementById("flockRangeSeperation").value);
@@ -773,8 +838,8 @@ function Main()
   flockSize, // flock size
   minSpeed, // minimum speed
   maxSpeed, // maximum speed
-  w, // canvas width
-  h, // canvas height
+  view.width, // canvas width
+  view.height, // canvas height
   seperation, // seperation
   seperationF, // seperation tuning factor
   alignment, // alignment
@@ -796,8 +861,25 @@ function Main()
   if(flock.minSpeed !== minSpeed) ShowSlider(flockRangeMinSpeed, flockInputMinSpeed, flock.minSpeed);
   if(flock.maxSpeed !== maxSpeed) ShowSlider(flockRangeMaxSpeed, flockInputMaxSpeed, flock.maxSpeed);
   ShowPending();
-  document.getElementById('IS_PAUSED').style.display = '';
-  document.getElementById('IS_PLAYING').style.display = 'none';
+  ShowStatus();
+}
+
+// The flock size slider as a whole number within its limits. Anything else is
+// replaced, and the status says so until the next Generate.
+function FlockSize()
+{
+  let value = parseInt(flockSizeRange.value);
+  let min = parseInt(flockSizeRange.min);
+  let max = parseInt(flockSizeRange.max);
+  if(!Number.isFinite(min)) min = 1;
+  if(!Number.isFinite(max)) max = Infinity;
+  notices.input = "";
+  if(Number.isFinite(value) && value >= min && value <= max) return value;
+  let used = Number.isFinite(value) ? Math.min(Math.max(value, min), max) : DEFAULT_FLOCK_SIZE;
+  notices.input = "Flock size " + JSON.stringify(flockSizeRange.value) + " is not a whole number from "
+    + min + " to " + max + ", so " + used + " was used.";
+  ShowSlider(flockSizeRange, flockSizeInput, used);
+  return used;
 }
 
 function Settings()
@@ -806,36 +888,80 @@ function Settings()
   else settingsMenu.style.display = "";
 }
 
-function RestartFlock()
+// Play, Pause and Step are the only ways the buttons and keys start or stop
+// the loop, so the Play/Pause button always shows what the loop does.
+function Play()
 {
-  flock.Toggle();
-
-  if(flock.toggle)
-  {
-    document.getElementById('IS_PAUSED').style.display = 'none';
-    document.getElementById('IS_PLAYING').style.display = '';
-  }
-  else
-  {
-    document.getElementById('IS_PAUSED').style.display = '';
-    document.getElementById('IS_PLAYING').style.display = 'none';
-  }
+  loop.Play();
+  ShowPlaying(loop.running);
 }
 
+function Pause()
+{
+  loop.Pause();
+  ShowPlaying(false);
+}
+
+// Pauses, then advances exactly one tick and draws it.
+function StepOnce()
+{
+  Pause();
+  if(ViewValid()) flock.Step();
+  flock.DrawFlock(flock.shape);
+}
+
+function ShowPlaying(playing)
+{
+  document.getElementById('IS_PAUSED').style.display = playing ? 'none' : '';
+  document.getElementById('IS_PLAYING').style.display = playing ? '' : 'none';
+}
+
+// Whether the canvas has room to simulate in (MIN_VIEW_SIZE). Ticks are
+// skipped while it has not, which leaves every agent as it is.
+function ViewValid()
+{
+  return view.width >= MIN_VIEW_SIZE && view.height >= MIN_VIEW_SIZE;
+}
+
+// Shows every notice, or hides the status when there is none.
+function ShowStatus()
+{
+  let text = [notices.error, notices.viewport, notices.input].filter((notice) => notice !== "").join(" ");
+  statusMessage.textContent = text;
+  statusMessage.style.display = text === "" ? "none" : "";
+}
+
+// Sizes the canvas to the window. Its logical size, in CSS pixels, is what the
+// flock moves in and what is drawn in. Its backing store has devicePixelRatio
+// times as many pixels, so drawing stays sharp on high-DPI screens. The flock
+// keeps its agents and play state; agents left outside a smaller window wrap
+// or turn back in as usual.
 function ReSize()
 {
-  gameContainer.width = window.innerWidth;
-  gameContainer.height = window.innerHeight;
-  gameDiv.width = window.innerWidth;
-  gameDiv.height = window.innerHeight;
-  gameCanvas.width = window.innerWidth;
-  gameCanvas.height = window.innerHeight;
-  c.width = window.innerWidth;
-  c.height = window.innerHeight;
-  if(flock != null)
+  let width = Math.floor(window.innerWidth);
+  let height = Math.floor(window.innerHeight);
+  view.width = Number.isFinite(width) ? Math.max(0, width) : 0;
+  view.height = Number.isFinite(height) ? Math.max(0, height) : 0;
+  let ratio = window.devicePixelRatio;
+  if(!(Number.isFinite(ratio) && ratio > 0)) ratio = 1;
+
+  // Setting the backing size clears the canvas, so it is only set on a change.
+  let pixelWidth = Math.round(view.width * ratio);
+  let pixelHeight = Math.round(view.height * ratio);
+  if(gameCanvas.width !== pixelWidth) gameCanvas.width = pixelWidth;
+  if(gameCanvas.height !== pixelHeight) gameCanvas.height = pixelHeight;
+  gameCanvas.style.width = view.width + "px";
+  gameCanvas.style.height = view.height + "px";
+  c.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+  notices.viewport = ViewValid() ? "" : "The window is too small to show the flock ("
+    + view.width + " × " + view.height + " px). Make it larger to continue.";
+  ShowStatus();
+
+  if(flock !== null)
   {
-    flock.width = gameContainer.scrollWidth;
-    flock.height = gameContainer.scrollHeight;
+    flock.width = view.width;
+    flock.height = view.height;
     flock.DrawFlock(flock.shape);
   }
 }
@@ -895,11 +1021,14 @@ function ShowSlider(range, text, value)
   text.value = String(value);
 }
 
+// u steps, p pauses and i plays, as the buttons do. Shortcuts with a modifier
+// (Ctrl+P and the like) are left to the browser.
 document.onkeydown = function(event)
 {
-  if(event.key == "u") flock.Update();
-  if(event.key == "p") flock.Pause();
-  if(event.key == "i") flock.Iterate();
+  if(event.ctrlKey || event.metaKey || event.altKey) return;
+  if(event.key == "u") StepOnce();
+  if(event.key == "p") Pause();
+  if(event.key == "i") Play();
 }
 
 window.addEventListener('resize', ReSize);

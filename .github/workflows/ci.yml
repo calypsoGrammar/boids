@@ -36,8 +36,10 @@ jobs:
       - run: npm run lint
       - run: npm run build
       # The build must reproduce the committed dist/ exactly (npm test also
-      # checks the asset file names).
+      # checks the asset file names). dist is in .gitignore, so --ignored is
+      # needed to catch a new asset that was never committed.
       - run: git diff --exit-code -- dist
+      - run: test -z "$(git status --porcelain --ignored -- dist)"
       - run: npm test
 
   audit:

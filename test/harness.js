@@ -42,10 +42,11 @@ function fakeContext(calls)
     arc: record('arc'),
     fill: record('fill'),
     fillText: record('fillText'),
+    setTransform: record('setTransform'),
   };
 }
 
-export function loadPage({ width = 1280, height = 720, seed = 1 } = {})
+export function loadPage({ width = 1280, height = 720, devicePixelRatio = 1, seed = 1 } = {})
 {
   const calls = [];
   const elements = {};
@@ -61,11 +62,12 @@ export function loadPage({ width = 1280, height = 720, seed = 1 } = {})
     scrollHeight: { get: () => window.innerHeight },
   });
   element('settingsMenu', { style: { display: 'none' } });
+  element('statusMessage', { style: { display: 'none' }, textContent: '' });
   element('IS_PLAYING', { style: { display: 'none' } });
 
   const startButtons = [element('IS_PAUSED'), elements.IS_PLAYING];
   const on = (target) => (type, fn) => (listeners[target + ':' + type] ??= []).push(fn);
-  const window = { innerWidth: width, innerHeight: height, addEventListener: on('window') };
+  const window = { innerWidth: width, innerHeight: height, devicePixelRatio, addEventListener: on('window') };
   const document = {
     documentElement: { style: { setProperty() {} } },
     getElementById: (id) => element(id),
@@ -86,14 +88,17 @@ export function loadPage({ width = 1280, height = 720, seed = 1 } = {})
   const math = Object.create(Math);
   math.random = random;
 
+  // Pending requestAnimationFrame callbacks, and the frame clock in ms.
+  // main.js gets no setInterval or setTimeout, so it cannot leave one running.
   const timers = new Map();
   let nextTimer = 1;
+  let now = 1000;
   const context = vm.createContext({
     window,
     document,
     Math: math,
-    setInterval: (fn) => { timers.set(nextTimer, fn); return nextTimer++; },
-    clearInterval: (id) => timers.delete(id),
+    requestAnimationFrame: (fn) => { timers.set(nextTimer, fn); return nextTimer++; },
+    cancelAnimationFrame: (id) => timers.delete(id),
   });
 
   const script = source.replace(/^import Alpine.*$/m, '').replace(/^window\.Alpine.*$/m, '').replace(/^Alpine\.start\(\).*$/m, '');
@@ -110,13 +115,23 @@ export function loadPage({ width = 1280, height = 720, seed = 1 } = {})
     get flock() { return page.eval('flock'); },
     load() { fire('window:DOMContentLoaded'); fire('document:DOMContentLoaded'); },
     resize(w, h) { window.innerWidth = w; window.innerHeight = h; fire('window:resize'); },
-    // Runs the pending setInterval callback n times, as the browser would.
-    // Only the draw calls of the last frame are kept.
-    tick(n = 1) { for(let i = 0; i < n; i++) for(const fn of [...timers.values()]) { calls.length = 0; fn(); } },
+    // Runs one display frame `ms` after the last: the pending
+    // requestAnimationFrame callbacks, as the browser would. Only the draw
+    // calls of this frame are kept.
+    frame(ms)
+    {
+      now += ms;
+      const pending = [...timers];
+      timers.clear();
+      calls.length = 0;
+      for(const [, fn] of pending) fn(now);
+    },
+    // Runs n frames of one 8 ms tick each.
+    tick(n = 1) { for(let i = 0; i < n; i++) page.frame(8); },
     setSlider(id, value) { elements[id].value = String(value); elements[id].onchange(); },
     setCheckbox(id, checked) { elements[id].checked = checked; elements[id].onchange(); },
     click(id) { elements[id].onclick(); },
-    key(key) { document.onkeydown({ key }); },
+    key(key, modifiers = {}) { document.onkeydown({ key, ...modifiers }); },
   };
   return page;
 }
