@@ -7,9 +7,6 @@ export default [
   {
     files: ['src/**/*.js'],
     languageOptions: { globals: globals.browser },
-    // Flock's constructor takes its settings positionally, including ones it
-    // does not read yet.
-    rules: { 'no-unused-vars': ['error', { args: 'none' }] },
   },
   {
     files: ['test/**/*.js', '*.config.js'],

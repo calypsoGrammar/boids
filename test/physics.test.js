@@ -12,9 +12,13 @@
 //   fail until Dn is fixed (BOIDS-V1-04 / V1-05). node --test reports them
 //   as todo and they don't fail the run. A fix removes the todo option.
 //   CAL-1286 (BOIDS-V1-05) fixed the last one, D5.
+//
+// Since CAL-1288 (BOIDS-V1-07) the physics is its own module
+// (src/javascripts/flock.js) and these tests import it directly.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { Flock } from '../src/javascripts/flock.js';
 import { loadPage } from './harness.js';
 import { DEFAULTS, SPECIES, finite, scene, scripted, seeded, snapshot, speed, turnAngle } from './fixtures.js';
 
@@ -26,20 +30,26 @@ function steer(flock, i = 0)
 {
   const agent = flock.agents[i];
   flock.GetNearbyAgents(agent, flock.agents.length);
-  const before = { vx: agent.vx, vy: agent.vy };
-  flock.Adjust(agent);
-  return { dvx: agent.vx - before.vx, dvy: agent.vy - before.vy };
+  const [dvx, dvy] = flock.Steer(agent);
+  return { dvx, dvy };
 }
 
 // --- The random seam -------------------------------------------------------
 
 test('Flock.random defaults to Math.random, and Start() draws only from it', () => {
-  const page = loadPage();
+  assert.equal(new Flock().random, Math.random);
+  for(const file of ['flock.js', 'agent.js', 'controller.js'])
+  {
+    const source = readFileSync(new URL('../src/javascripts/' + file, import.meta.url), 'utf8');
+    assert.equal(source.match(/Math\.random\(/g), null, file + ' makes no direct draws');
+  }
+  // The page hands its random source to every flock it generates.
+  const page = loadPage({ seed: 3 });
   page.load();
-  assert.equal(page.eval('new Flock().random === Math.random'), true);
-  const source = readFileSync(new URL('../src/javascripts/main.js', import.meta.url), 'utf8');
-  assert.equal(source.match(/Math\.random\(/g), null, 'no direct draws');
-  assert.match(source, /this\.random = Math\.random;/);
+  const first = page.flock.agents.map((a) => a.x);
+  const again = loadPage({ seed: 3 });
+  again.load();
+  assert.deepEqual(again.flock.agents.map((a) => a.x), first);
 });
 
 test('the same random source rebuilds the same flock in a fresh scene', () => {
@@ -63,14 +73,14 @@ test('Start() maps random draws to colours, positions and signed speeds', () => 
   assert.equal(agent.colour, 'rgba(25,51,76, 1)');
   // Spawned inside the box edges 5..795 and 5..595: (5 + floor(0.25 * 790),
   // 5 + floor(0.75 * 590)) = (202, 447), with v = (-2, max(0.5, 0.25)).
-  // Start() then runs one Update().
+  // Start() then runs one Step().
   assert.deepEqual(snapshot(flock), [{ x: 200, y: 447.5, vx: -2, vy: 0.5 }]);
 });
 
 test('Start() spawns every agent inside the box', () => {
   const { flock } = scene({ flockSize: 200, boxX: 150, boxY: 100, random: seeded(3) });
   flock.Start();
-  // The box edges are 155..645 and 105..495; one Update() moves at most 2.5.
+  // The box edges are 155..645 and 105..495; one Step() moves at most 2.5.
   assert.ok(flock.agents.every((a) => a.x >= 152.5 && a.x <= 647.5 && a.y >= 102.5 && a.y <= 497.5));
 });
 
@@ -78,7 +88,7 @@ test('Start() spawns every agent inside the box', () => {
 
 test('an agent with no neighbours flies straight at constant velocity', () => {
   const { flock } = scene({ agents: [{ x: 400, y: 300, vx: 1.5, vy: -1 }] });
-  for(let i = 0; i < 100; i++) flock.Update();
+  for(let i = 0; i < 100; i++) flock.Step();
   assert.deepEqual(snapshot(flock), [{ x: 550, y: 200, vx: 1.5, vy: -1 }]);
   assert.deepEqual([...flock.agents[0].nearby], []);
 });
@@ -242,9 +252,9 @@ test('species bias sorts a mixed flock by colour, and bias 0 does not', () => {
   // The share of each agent's neighbours that are its own species, after a
   // seeded 3-species flock has run for a while.
   const ownShare = (bias) => {
-    const { flock, calls } = scene({ flockSize: 90, raceCount: 3, bias, variance: 0, random: seeded(21) });
+    const { flock } = scene({ flockSize: 90, raceCount: 3, bias, variance: 0, random: seeded(21) });
     flock.Start();
-    for(let i = 0; i < 600; i++) { calls.length = 0; flock.Update(); }
+    for(let i = 0; i < 600; i++) flock.Step();
     let own = 0, all = 0;
     for(const agent of flock.agents)
     {
@@ -365,7 +375,7 @@ test('D4: Validate() lowers a minSpeed above maxSpeed and repairs non-finite set
   const settle = (settings) => {
     const { flock } = scene({ agents: [], ...settings });
     flock.Validate();
-    return [flock.minSpeed, flock.maxSpeed, flock.box_x, flock.box_y];
+    return [flock.minSpeed, flock.maxSpeed, flock.boxX, flock.boxY];
   };
   assert.deepEqual(settle({}), [0.5, 2.5, 0, 0], 'the defaults are kept');
   assert.deepEqual(settle({ minSpeed: 0.3, maxSpeed: 0.7 }), [0.3, 0.7, 0, 0], 'fractions are kept');
@@ -375,11 +385,11 @@ test('D4: Validate() lowers a minSpeed above maxSpeed and repairs non-finite set
   assert.deepEqual(settle({ boxX: -20, boxY: NaN }), [0.5, 2.5, 0, 0]);
 });
 
-test('D4: Update() validates the settings before stepping', () => {
+test('D4: Step() validates the settings before stepping', () => {
   const { flock } = scene({ agents: [{ x: 400, y: 300, vx: 3, vy: 4 }] });
   flock.minSpeed = 9;
   flock.maxSpeed = 2;
-  flock.Update();
+  flock.Step();
   near(speed(flock.agents[0]), 2, 'speed', 1e-12);
 });
 
@@ -418,7 +428,7 @@ for(const [name, b] of [
     const gap = () => Math.hypot(a.x - b.x, a.y - b.y);
     for(let i = 0; i < 100; i++)
     {
-      flock.Update();
+      flock.Step();
       assert.ok(flock.agents.every(finite), 'frame ' + i);
     }
     assert.ok(gap() >= 20, 'apart after 100 frames: ' + gap());
@@ -441,7 +451,7 @@ test('D3: a stack of agents on one point spreads out, deterministically and fini
     const { flock } = scene({ agents });
     for(let i = 0; i < 60; i++)
     {
-      flock.Update();
+      flock.Step();
       assert.ok(flock.agents.every(finite), 'frame ' + i);
     }
     return snapshot(flock);
@@ -456,7 +466,7 @@ test('D3: a default 200-agent flock on whole-pixel spawns keeps every agent (see
   {
     const { flock } = scene({ flockSize: 200, width: 1280, height: 720, random: seeded(seed) });
     flock.Start();
-    for(let i = 0; i < 50; i++) flock.Update();
+    for(let i = 0; i < 50; i++) flock.Step();
     assert.ok(flock.agents.every(finite), 'seed ' + seed);
   }
 });
@@ -478,7 +488,7 @@ test('every agent steers from the state at the start of the tick', () => {
     return [agent.vx + dvx, agent.vy + dvy];
   });
   const { flock } = scene({ agents });
-  flock.Update();
+  flock.Step();
   flock.agents.forEach((agent, i) => {
     const [vx, vy] = expected[i];
     const s = Math.hypot(vx, vy);
@@ -499,7 +509,7 @@ test('the order of the agents does not change where they go', () => {
   ];
   const run = (list) => {
     const { flock } = scene({ agents: list });
-    for(let i = 0; i < 100; i++) flock.Update();
+    for(let i = 0; i < 100; i++) flock.Step();
     return snapshot(flock);
   };
   const forward = run(agents);
@@ -547,7 +557,7 @@ test('turn mode with a large box margin brings an agent back within a bounded ov
   for(let frame = 0; frame < 200; frame++)
   {
     const before = { vx: agent.vx, vy: agent.vy };
-    flock.Update();
+    flock.Step();
     furthest = Math.max(furthest, agent.x);
     turnedAt ??= agent.vx < 0 ? frame : null;
     // Bounded turns: an isolated agent only turns through the edge rule.
@@ -582,8 +592,8 @@ test('D9: box edges follow the canvas size, down to a canvas smaller than an age
 });
 
 test('D9: the drawn box is the capped box', () => {
-  const { flock, calls } = scene({ width: 375, height: 200, boxX: 500, boxY: 60, agents: [] });
-  flock.DrawFlock('circle');
+  const { calls, draw } = scene({ width: 375, height: 200, boxX: 500, boxY: 60, agents: [] });
+  draw();
   assert.deepEqual(calls.find(([name]) => name === 'rect'), ['rect', 177.5, 60, 20, 80]);
 });
 
@@ -596,7 +606,7 @@ for(const wrap of [true, false])
     {
       flock.width = w;
       flock.height = h;
-      for(let i = 0; i < 400; i++) flock.Update();
+      for(let i = 0; i < 400; i++) flock.Step();
       assert.equal(flock.agents.length, 50);
       assert.ok(flock.agents.every(finite), `${w} × ${h}`);
     }
@@ -608,7 +618,7 @@ for(const wrap of [true, false])
 test('D9: agents stay on the canvas whatever the box margin', () => {
   const { flock } = scene({ width: 375, height: 667, boxX: 500, boxY: 500, random: seeded(1), flockSize: 20 });
   flock.Start();
-  for(let i = 0; i < 100; i++) flock.Update();
+  for(let i = 0; i < 100; i++) flock.Step();
   assert.ok(flock.agents.every((a) => finite(a) && a.x >= 0 && a.x <= 375 && a.y >= 0 && a.y <= 667));
 });
 
@@ -699,9 +709,9 @@ test('the flock sliders move every agent, keeping its offset', () => {
 
 test('variance changes how a seeded flock moves', () => {
   const run = (variance) => {
-    const { flock, calls } = scene({ flockSize: 50, variance, random: seeded(9) });
+    const { flock } = scene({ flockSize: 50, variance, random: seeded(9) });
     flock.Start();
-    for(let i = 0; i < 300; i++) { calls.length = 0; flock.Update(); }
+    for(let i = 0; i < 300; i++) flock.Step();
     assert.ok(flock.agents.every((a) => finite(a) && speed(a) <= flock.maxSpeed + 1e-9));
     return snapshot(flock);
   };
@@ -739,9 +749,9 @@ test('variance 0 replays the CAL-1285 trajectories exactly', async () => {
   ];
   for(const [seed, frames, settings, checksum] of runs)
   {
-    const { flock, calls } = scene({ width: 1280, height: 720, random: seeded(seed), variance: 0, ...settings });
+    const { flock } = scene({ width: 1280, height: 720, random: seeded(seed), variance: 0, ...settings });
     flock.Start();
-    for(let i = 0; i < frames; i++) { calls.length = 0; flock.Update(); }
+    for(let i = 0; i < frames; i++) flock.Step();
     const state = new Float64Array(flock.agents.flatMap((a) => [a.x, a.y, a.vx, a.vy]));
     assert.equal(createHash('sha256').update(state).digest('hex').slice(0, 16), checksum, String(seed));
   }
@@ -765,7 +775,7 @@ test('species count: no species, fractions and non-numbers still give a valid fl
   {
     const { flock } = scene({ flockSize: 30, raceCount, random: seeded(4) });
     flock.Start();
-    for(let i = 0; i < 20; i++) flock.Update();
+    for(let i = 0; i < 20; i++) flock.Step();
     assert.equal(flock.raceCount, expected, String(raceCount));
     assert.equal(new Set(flock.agents.map((a) => a.colour)).size, expected, String(raceCount));
     assert.ok(flock.agents.every(finite), String(raceCount));
@@ -795,7 +805,7 @@ test('extreme flock sizes: 0 and 1 agents run without errors', () => {
   {
     const { flock } = scene({ flockSize, random: seeded(1) });
     flock.Start();
-    for(let i = 0; i < 500; i++) flock.Update();
+    for(let i = 0; i < 500; i++) flock.Step();
     assert.equal(flock.agents.length, flockSize);
     assert.ok(flock.agents.every(finite));
   }
@@ -818,7 +828,7 @@ for(const [name, settings, frames] of invariantRuns)
       flock.Start();
       for(let frame = 0; frame < frames; frame++)
       {
-        flock.Update();
+        flock.Step();
         for(const a of flock.agents)
         {
           const where = `seed ${seed}, frame ${frame}, ${a.name}`;
@@ -859,7 +869,7 @@ test('a fixed six-agent scene replays the recorded 200-frame trajectory', () => 
   const { flock } = scene({ minSpeed: 0, agents: GOLDEN_AGENTS });
   for(let i = 0; i < 200; i++)
   {
-    flock.Update();
+    flock.Step();
     assert.ok(flock.agents.every((a) => finite(a) && speed(a) <= DEFAULTS.maxSpeed + 1e-12), 'frame ' + i);
   }
   const actual = snapshot(flock);

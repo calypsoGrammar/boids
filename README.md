@@ -26,3 +26,6 @@ how they change the simulation.
 which settings need Generate.
 `docs/audit/BOIDS-V1-06.md` covers the animation loop, the controls, high-DPI
 resizing, the status messages and the performance figures.
+`docs/audit/BOIDS-V1-07.md` lists the modules in `src/javascripts/`, the
+settings model (which settings apply live, on Generate or to the picture
+only), the debug overlays and where to add a new force.
