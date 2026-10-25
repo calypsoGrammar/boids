@@ -3,7 +3,7 @@
 
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" href="/boids/assets/favicon-B0opx7u9.ico">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,218 +11,268 @@
     <link href="https://fonts.googleapis.com/css2?family=Electrolize&family=Katibeh&family=Martel:wght@200;300;400;600;700;800;900&display=swap" rel="stylesheet">
 
     <title>Boids</title>
-    <script type="module" crossorigin src="/boids/assets/index-BzE7fOzZ.js"></script>
-    <link rel="stylesheet" crossorigin href="/boids/assets/index-DXTDbZdm.css">
+    <script type="module" crossorigin src="/boids/assets/index-oetqqNXf.js"></script>
+    <link rel="stylesheet" crossorigin href="/boids/assets/index-BQecSml4.css">
   </head>
 
   <body
-  class='min-h-screen max-h-screen font-f1 text-md font-mod_dark bg-mod_light flex justify-center items-center'
+  class='overflow-hidden font-f1 text-base text-mod_dark bg-mod_light'
   id="BODY"
   >
 
-    <div
-    class="fixed z-20 bg-mod_light top-[6px] h-14 left-1/2 transform -translate-x-1/2 flex flex-row justify-center items-center rounded-lg shadow-lg">
-      <div class="flex w-full max-w-7xl h-full flex-row justify-around items-center mx-auto sm:px-6 lg:px-8">
-        <button
-        class="startButton flex justify-center items-center mx-2 active:scale-95"
-        id="IS_PAUSED"
-        >
-          <img
-          id="playPauseButton"
-          class=""
-          src="/boids/play.svg">
-        </button>
-        <button
-        class="startButton flex justify-center items-center mx-2 active:scale-95"
-        id="IS_PLAYING"
-        style="display:none;">
-          <img
-          id="playPauseButton"
-          class=""
-          src="/boids/pause.svg">
-        </button>
-        <button
-        id="nextButton"
-        class="flex justify-center items-center mx-2 active:scale-95"
-        >
-          <img
-          id="getNextButton"
-          class=""
-          src="./playNext.svg">
-        </button>
-        <button id="optionsButton" class="flex justify-center items-center mx-2 active:scale-95">
-          <img class="" src="./options.svg">
-        </button>
-      </div>
-    </div>
-  
-    <div
+    <nav id="toolbar" aria-label="Simulation controls" class="toolbar bg-mod_light rounded-lg shadow-lg">
+      <button
+      type="button"
+      class="startButton tool"
+      id="IS_PAUSED"
+      aria-label="Play"
+      aria-keyshortcuts="I"
+      >
+        <img id="playIcon" src="/boids/play.svg" alt="" width="24" height="24">
+        <span class="tooltip" aria-hidden="true">Play (I)</span>
+      </button>
+      <button
+      type="button"
+      class="startButton tool"
+      id="IS_PLAYING"
+      aria-label="Pause"
+      aria-keyshortcuts="P"
+      style="display:none;">
+        <img id="pauseIcon" src="/boids/pause.svg" alt="" width="24" height="24">
+        <span class="tooltip" aria-hidden="true">Pause (P)</span>
+      </button>
+      <button
+      type="button"
+      id="nextButton"
+      class="tool"
+      aria-label="Step one tick"
+      aria-keyshortcuts="U"
+      >
+        <img id="nextIcon" src="./playNext.svg" alt="" width="24" height="24">
+        <span class="tooltip" aria-hidden="true">Pause and step one tick (U)</span>
+      </button>
+      <button
+      type="button"
+      id="optionsButton"
+      class="tool"
+      aria-label="Settings"
+      aria-controls="settingsMenu"
+      aria-expanded="false"
+      >
+        <img id="optionsIcon" src="./options.svg" alt="" width="24" height="24">
+        <span class="tooltip" aria-hidden="true">Settings</span>
+      </button>
+    </nav>
+
+    <section
     id="settingsMenu"
-    class="fixed z-20 bg-mod_light top-[70px] left-1/2 rounded-lg transform -translate-x-1/2 z-10 flex flex-col justify-start content-start items-center w-full max-w-[600px] p-2 overflow-y-auto shadow-lg"
-    style="max-height:calc(100vh - 100px);display:none;opacity:90%">
+    aria-labelledby="settingsTitle"
+    class="settings-panel rounded-lg shadow-lg"
+    style="display:none">
 
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockSizeRange" class="w-28 m-2">Flock Size:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockSizeRange"
-          min="1" max="200" step="1" value="50" class="m-2 outline-red-500 w-24">
-          <input type="number" id="flockSizeInput" readonly class="text-center w-20 m-2" value="50">
-        </div>
-      </div>
-    
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockSizeShapeLine" class="w-28 m-2">Shape:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <label for="flockSizeShapeLine" class="m-2">Line</label>
-          <input type="radio" id="flockSizeShapeLine" 
-          name="flockSizeShape" value="Line" class="m-2">
-          <label for="flockSizeShapeCircle" class="m-2">Circle</label>
-          <input type="radio" id="flockSizeShapeCircle"
-          name="flockSizeShape" value="Circle" checked>
-        </div>
+      <div class="flex flex-row items-center justify-between">
+        <h2 id="settingsTitle" class="text-lg">Settings</h2>
+        <button type="button" id="settingsClose" class="tool" aria-label="Close settings">
+          <span aria-hidden="true" class="text-2xl leading-none">&times;</span>
+        </button>
       </div>
 
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeMinSpeed" class="w-28 m-2">Min Speed:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeMinSpeed"
-          min="0.1" max="10" step="0.1" value="0.5" class="m-2">
-          <input type="number" id="flockInputMinSpeed" readonly class="w-24 m-2" value="0.5">
-        </div>
+      <p id="controlsHelp" class="hint">
+        Play (I) runs the flock and Pause (P) freezes it. Step (U) pauses and moves one tick (8&nbsp;ms).
+        Changes apply at once, except those marked <span class="cue">Generate</span>.
+        Generate starts a new, paused flock from every setting.
+      </p>
+      <span id="generateCue" class="sr-only">Applies on Generate.</span>
+
+      <div class="settings-groups">
+
+        <fieldset class="settings-group">
+          <legend>Flock</legend>
+
+          <div class="setting" data-applies="generate">
+            <div class="setting-head">
+              <label for="flockSizeRange">Flock size</label>
+              <span class="cue" aria-hidden="true">Generate</span>
+              <span class="value"><output id="flockSizeInput" for="flockSizeRange">50</output> boids</span>
+            </div>
+            <input type="range" id="flockSizeRange" aria-describedby="generateCue"
+            min="1" max="200" step="1" value="50">
+          </div>
+
+          <fieldset class="setting" data-applies="live">
+            <legend class="setting-head">Shape</legend>
+            <div class="flex flex-row flex-wrap gap-x-2">
+              <label class="choice">
+                <input type="radio" id="flockSizeShapeLine" name="flockSizeShape" value="Line">
+                <span>Line</span>
+              </label>
+              <label class="choice">
+                <input type="radio" id="flockSizeShapeCircle" name="flockSizeShape" value="Circle" checked>
+                <span>Circle</span>
+              </label>
+            </div>
+          </fieldset>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>Movement</legend>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeMinSpeed">Min speed</label>
+              <span class="value"><output id="flockInputMinSpeed" for="flockRangeMinSpeed">0.5</output> px/tick</span>
+            </div>
+            <input type="range" id="flockRangeMinSpeed"
+            min="0.1" max="10" step="0.1" value="0.5">
+          </div>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeMaxSpeed">Max speed</label>
+              <span class="value"><output id="flockInputMaxSpeed" for="flockRangeMaxSpeed">2.5</output> px/tick</span>
+            </div>
+            <input type="range" id="flockRangeMaxSpeed"
+            min="0.2" max="10" step="0.1" value="2.5">
+          </div>
+          <p id="speedNotice" class="notice" role="status" style="display:none"></p>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeSeperation">Separation</label>
+              <span class="value"><output id="flockInputSeperation" for="flockRangeSeperation">0.10</output> ×</span>
+            </div>
+            <input type="range" id="flockRangeSeperation"
+            min="0.00" max="0.25" step="0.01" value="0.10">
+          </div>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeSeperationFactor">Separation strength</label>
+              <span class="value"><output id="flockInputSeperationFactor" for="flockRangeSeperationFactor">10</output> ×</span>
+            </div>
+            <input type="range" id="flockRangeSeperationFactor"
+            min="0" max="10" step="0.1" value="10">
+          </div>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeAlignment">Alignment</label>
+              <span class="value"><output id="flockInputAlignment" for="flockRangeAlignment">0.10</output> ×</span>
+            </div>
+            <input type="range" id="flockRangeAlignment"
+            min="0.00" max="0.25" step="0.01" value="0.10">
+          </div>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeCohesion">Cohesion</label>
+              <span class="value"><output id="flockInputCohesion" for="flockRangeCohesion">0.0005</output> ×</span>
+            </div>
+            <input type="range" id="flockRangeCohesion"
+            min="0" max="0.0025" step="0.0001" value="0.0005">
+          </div>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeTurn">Turn factor</label>
+              <span class="value"><output id="flockInputTurn" for="flockRangeTurn">0.4</output> px/tick²</span>
+            </div>
+            <input type="range" id="flockRangeTurn" aria-describedby="hintTurn"
+            min="0.1" max="1" step="0.1" value="0.4">
+            <p id="hintTurn" class="hint">How hard boids turn back at the box edge when Wrap is off.</p>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>Species</legend>
+
+          <div class="setting" data-applies="generate">
+            <div class="setting-head">
+              <label for="flockRangeTribes">Species</label>
+              <span class="cue" aria-hidden="true">Generate</span>
+              <span class="value"><output id="flockInputTribes" for="flockRangeTribes">2</output></span>
+            </div>
+            <input type="range" id="flockRangeTribes" aria-describedby="generateCue"
+            min="1" max="10" step="1" value="2">
+          </div>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeBias">Bias</label>
+              <span class="value"><output id="flockInputBias" for="flockRangeBias">50</output></span>
+            </div>
+            <input type="range" id="flockRangeBias" aria-describedby="hintBias"
+            min="0" max="100" step="1" value="50">
+            <p id="hintBias" class="hint">Other species count 1/bias as much in alignment and cohesion. 0 and 1 mean no bias.</p>
+          </div>
+
+          <div class="setting" data-applies="generate">
+            <div class="setting-head">
+              <label for="flockRangeVariance">Variance</label>
+              <span class="cue" aria-hidden="true">Generate</span>
+              <span class="value"><output id="flockRangeVarianceText" for="flockRangeVariance">5</output> %</span>
+            </div>
+            <input type="range" id="flockRangeVariance" aria-describedby="generateCue hintVariance"
+            min="0" max="100" step="1" value="5">
+            <p id="hintVariance" class="hint">How far each boid's separation, alignment and cohesion may differ, as a share of the slider range.</p>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>Environment &amp; diagnostics</legend>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeBoxX">Box inset X</label>
+              <span class="value"><output id="flockInputBoxX" for="flockRangeBoxX">0</output> px</span>
+            </div>
+            <input type="range" id="flockRangeBoxX"
+            min="0" max="500" step="1" value="0">
+          </div>
+
+          <div class="setting" data-applies="live">
+            <div class="setting-head">
+              <label for="flockRangeBoxY">Box inset Y</label>
+              <span class="value"><output id="flockInputBoxY" for="flockRangeBoxY">0</output> px</span>
+            </div>
+            <input type="range" id="flockRangeBoxY"
+            min="0" max="500" step="1" value="0">
+          </div>
+          <p id="boxNotice" class="notice" role="status" style="display:none"></p>
+
+          <div class="setting" data-applies="live">
+            <label class="choice">
+              <input type="checkbox" id="flockWrap" checked>
+              <span>Wrap at the box edges</span>
+            </label>
+            <label class="choice">
+              <input type="checkbox" id="flockNearby">
+              <span>Show nearby <span class="hint">(green)</span></span>
+            </label>
+            <label class="choice">
+              <input type="checkbox" id="flockClose">
+              <span>Show close <span class="hint">(red)</span></span>
+            </label>
+          </div>
+        </fieldset>
       </div>
 
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeMaxSpeed" class="w-28 m-2">Max Speed:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeMaxSpeed"
-          min="0.2" max="10" step="0.1" value="2.5" class="m-2">
-          <input type="number" id="flockInputMaxSpeed" readonly class="w-24 m-2" value="2.5">
-        </div>
+      <div id="generate" class="generate-bar">
+        <p id="generatePending" class="hint text-center" role="status" style="display:none">Press Generate to apply Flock Size, Species and Variance.</p>
+        <button type="button" id="generateButton" aria-describedby="hintGenerate" class="w-28 h-11 mx-auto motion-safe:active:scale-95 bg-mod_dark text-mod_light rounded-lg hover:bg-mod_dark_light">Generate</button>
+        <span id="hintGenerate" class="sr-only">Replaces the flock with a new, paused one.</span>
       </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeSeperation" class="w-28 m-2">Seperation:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeSeperation"
-          min="0.00" max="0.25" step="0.01" value="0.10"
-          onchange="UpdateSlider(4,
-          flockRangeSeperation.value,
-          flockInputSeperation);" class="m-2">
-          <input type="number" id="flockInputSeperation" readonly class="w-24 m-2" value="0.10">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeSeperationFactor" class="w-28 m-2">Seperation Factor:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeSeperationFactor"
-          min="0" max="10" step="0.1" value="10" class="m-2">
-          <input type="number" id="flockInputSeperationFactor" readonly class="w-24 m-2" value="10">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeAlignment" class="w-28 m-2">Alignment:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeAlignment"
-          min="0.00" max="0.25" step="0.01" value="0.10" class="m-2">
-          <input type="number" id="flockInputAlignment" readonly class="w-24 m-2" value="0.10">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeCohesion" class="w-28 m-2">Cohesion:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeCohesion"
-          min="0" max="0.0025" step="0.0001" value="0.0005" class="m-2">
-          <input type="number" id="flockInputCohesion" readonly class="w-24 m-2" value="0.0005">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeTurn" class="w-28 m-2">Turn Factor:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeTurn"
-          min="0.1" max="1" step="0.1" value="0.4" class="m-2">
-          <input type="number" id="flockInputTurn" readonly class="w-24 m-2" value="0.4">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeTribes" class="w-28 m-2">Species:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeTribes"
-          min="1" max="10" step="1" value="2" class="m-2">
-          <input type="number" id="flockInputTribes" readonly class="w-24 m-2" value="2">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeBias" class="w-28 m-2">Bias:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeBias"
-          min="0" max="100" step="1" value="50" class="m-2">
-          <input type="number" id="flockInputBias" readonly class="w-24 m-2" value="50">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeVariance" class="w-28 m-2">Variance:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeVariance"
-          min="0" max="100" step="1" value="5" class="m-2">
-          <input type="number" id="flockRangeVarianceText" readonly class="w-24 m-2" value="5">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeBoxX" class="w-28 m-2">Box-X:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeBoxX"
-          min="0" max="500" step="1" value="0" class="m-2">
-          <input type="number" id="flockInputBoxX" readonly class="w-24 m-2" value="0">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-col sm:flex-row justify-center items-center">
-        <label for="flockRangeBoxY" class="w-28 m-2">Box-Y:</label>
-        <div class="m-2 p-2 flex flex-row justify-center items-center">
-          <input type="range" id="flockRangeBoxY"
-          min="0" max="500" step="1" value="0" class="m-2">
-          <input type="number" id="flockInputBoxY" readonly class="w-24 m-2" value="0">
-        </div>
-      </div>
-
-      <div class="m-2 flex flex-row justify-center items-center">
-        <label for="flockWrap" class="m-2 w-28">Wrap:</label>
-        <input type="checkbox" id="flockWrap" checked class="m-2">
-      </div>
-
-      <div class="m-2 flex flex-row justify-center items-center">
-        <label for="flockNearby" class="m-2 w-28">Show Nearby:</label>
-        <input type="checkbox" id="flockNearby" class="m-2">
-      </div>
-
-      <div class="m-2 flex flex-row justify-center items-center">
-        <label for="flockClose" class="m-2 w-28">Show Close:</label>
-        <input type="checkbox" id="flockClose" class="m-2">
-      </div>
-    
-      <div id="generate" class="m-2 flex flex-col items-center">
-        <p id="generatePending" class="m-2 text-center" style="display:none">Press Generate to apply Flock Size, Species and Variance.</p>
-        <button id="generateButton" class="w-24 h-12 mx-auto m-4 active:scale-95 bg-mod_dark text-mod_light rounded-lg hover:bg-mod_dark_light">Generate</button>
-      </div>
-    </div>
+    </section>
 
     <p
     id="statusMessage"
     role="status"
-    class="fixed z-30 bottom-4 left-1/2 transform -translate-x-1/2 w-11/12 max-w-[600px] p-2 rounded-lg shadow-lg bg-mod_dark text-mod_light text-center"
+    class="status-message rounded-lg shadow-lg bg-mod_dark text-mod_light text-center"
     style="display:none"></p>
 
-    <div id="gameContainer" class="fixed w-full flex justify-center items-center min-h-screen max-h-screen">
-      <div id="gameDiv" class="flex justify-center items-center min-h-screen max-h-screen">
-        <canvas id="gameCanvas"></canvas>
+    <div id="gameContainer" class="fixed inset-0 z-0 overflow-hidden">
+      <div id="gameDiv" class="w-full h-full">
+        <canvas id="gameCanvas" class="block" role="img" aria-label="Boids flocking simulation"></canvas>
       </div>
     </div>
 

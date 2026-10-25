@@ -50,12 +50,12 @@ test('the built CSS keeps the design palette and font', () => {
     const rule = css.match(new RegExp(`input\\[type=${type}\\]\\{([^}]*)\\}`))[1].split(';');
     assert.ok(rule.includes('accent-color:#323232') && rule.includes('background-color:#fafafa'), type);
   }
-  // Every class in index.html that Tailwind knows is generated. The rest are
-  // known markup defects (D13) or plain hooks for main.js.
+  // Every class in index.html is generated, apart from the startButton hook
+  // for main.js. (D13's font-mod_dark and text-md were fixed in CAL-1289.)
   const classes = new Set([...html.matchAll(/class=["']([^"']*)["']/g)].flatMap((m) => m[1].split(/\s+/)).filter(Boolean));
   const escape = (name) => name.replace(/[^\w-]/g, (c) => '\\' + c);
   const missing = [...classes].filter((name) => !css.includes('.' + escape(name)));
-  assert.deepEqual(missing.sort(), ['font-mod_dark', 'startButton', 'text-md']);
+  assert.deepEqual(missing.sort(), ['startButton']);
 });
 
 test('the build keeps the Vite 4 browser targets', () => {

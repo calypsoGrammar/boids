@@ -63,7 +63,7 @@ not pause the flock. (`u` used to add one tick without pausing.)
   clears the canvas and resets the context.
 - The page does not watch for a `devicePixelRatio` change that comes without a
   resize event, such as moving the window to another screen in some browsers.
-  The next resize picks it up.
+  The next resize picks it up. (CAL-1289 now watches for it: `docs/audit/BOIDS-V1-08.md` §5.)
 
 ## 4. Controlled error states
 
