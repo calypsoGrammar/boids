@@ -51,7 +51,14 @@ export function loadPage({ width = 1280, height = 720, devicePixelRatio = 1, see
   const calls = [];
   const elements = {};
   const listeners = {};
-  const element = (id, props = {}) => (elements[id] ??= { id, style: { display: '' }, ...props });
+  const element = (id, props = {}) => (elements[id] ??= {
+    id,
+    style: { display: '' },
+    attributes: {},
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    ...props,
+  });
 
   for(const [id, props] of Object.entries(parseInputs())) element(id, props);
   const ctx = fakeContext(calls);

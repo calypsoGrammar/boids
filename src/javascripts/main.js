@@ -682,6 +682,7 @@ const optionsButton = document.getElementById("optionsButton");
 optionsButton.onclick = function(){ Settings() };
 
 const settingsMenu = document.getElementById("settingsMenu");
+document.getElementById("settingsClose").onclick = function(){ Settings(false) };
 
 const flockSizeInput = document.getElementById("flockSizeInput");
 const flockSizeRange = document.getElementById("flockSizeRange");
@@ -794,6 +795,14 @@ flockClose.onchange = function(){ UpdateSlider(15,
   flockClose.checked,)
 };
 
+// Every slider also updates while it is dragged, so its value shows at once.
+for(const range of [flockSizeRange, flockRangeMinSpeed, flockRangeMaxSpeed, flockRangeSeperation,
+  flockRangeSeperationFactor, flockRangeAlignment, flockRangeCohesion, flockRangeTurn, flockRangeTribes,
+  flockRangeBias, flockRangeVariance, flockRangeBoxX, flockRangeBoxY])
+  range.oninput = range.onchange;
+
+const speedNotice = document.getElementById("speedNotice");
+const boxNotice = document.getElementById("boxNotice");
 const generatePending = document.getElementById("generatePending");
 const generateButton = document.getElementById("generateButton");
 generateButton.onclick = function(){ Main(); };
@@ -860,6 +869,8 @@ function Main()
   // Start() may have lowered a min speed above the max: show what is used.
   if(flock.minSpeed !== minSpeed) ShowSlider(flockRangeMinSpeed, flockInputMinSpeed, flock.minSpeed);
   if(flock.maxSpeed !== maxSpeed) ShowSlider(flockRangeMaxSpeed, flockInputMaxSpeed, flock.maxSpeed);
+  ShowNotice(speedNotice, "");
+  ShowBoxNotice();
   ShowPending();
   ShowStatus();
 }
@@ -882,10 +893,15 @@ function FlockSize()
   return used;
 }
 
-function Settings()
+// Opens or closes the settings, or toggles them when `open` is not given.
+// Closing them from inside moves the focus back to the Settings button, so
+// keyboard users do not lose their place.
+function Settings(open = settingsMenu.style.display === "none")
 {
-  if(settingsMenu.style.display === "") settingsMenu.style.display = "none";
-  else settingsMenu.style.display = "";
+  let focusInside = !open && typeof settingsMenu.contains === "function" && settingsMenu.contains(document.activeElement);
+  settingsMenu.style.display = open ? "" : "none";
+  optionsButton.setAttribute("aria-expanded", String(open));
+  if(focusInside) optionsButton.focus();
 }
 
 // Play, Pause and Step are the only ways the buttons and keys start or stop
@@ -910,10 +926,16 @@ function StepOnce()
   flock.DrawFlock(flock.shape);
 }
 
+// Shows Pause while playing and Play while paused. The two are separate
+// buttons, so when the focused one is hidden the focus moves to the other.
 function ShowPlaying(playing)
 {
-  document.getElementById('IS_PAUSED').style.display = playing ? 'none' : '';
-  document.getElementById('IS_PLAYING').style.display = playing ? '' : 'none';
+  let play = document.getElementById('IS_PAUSED');
+  let pause = document.getElementById('IS_PLAYING');
+  let focused = document.activeElement === play || document.activeElement === pause;
+  play.style.display = playing ? 'none' : '';
+  pause.style.display = playing ? '' : 'none';
+  if(focused) (playing ? pause : play).focus();
 }
 
 // Whether the canvas has room to simulate in (MIN_VIEW_SIZE). Ticks are
@@ -953,6 +975,7 @@ function ReSize()
   gameCanvas.style.width = view.width + "px";
   gameCanvas.style.height = view.height + "px";
   c.setTransform(ratio, 0, 0, ratio, 0, 0);
+  WatchRatio(ratio);
 
   notices.viewport = ViewValid() ? "" : "The window is too small to show the flock ("
     + view.width + " × " + view.height + " px). Make it larger to continue.";
@@ -963,7 +986,22 @@ function ReSize()
     flock.width = view.width;
     flock.height = view.height;
     flock.DrawFlock(flock.shape);
+    ShowBoxNotice();
   }
+}
+
+// Page zoom or a move to another screen can change devicePixelRatio without a
+// resize event. A media query for the current ratio stops matching when it
+// does, and ReSize() then sizes the backing store for the new ratio.
+let ratioQuery = null;
+function WatchRatio(ratio)
+{
+  if(typeof window.matchMedia !== "function") return;
+  if(ratioQuery !== null && ratioQuery.ratio === ratio) return;
+  if(ratioQuery !== null) ratioQuery.list.removeEventListener("change", ReSize);
+  let list = window.matchMedia("(resolution: " + ratio + "dppx)");
+  list.addEventListener("change", ReSize);
+  ratioQuery = { ratio, list };
 }
 
 function ChangeShape()
@@ -984,12 +1022,16 @@ function UpdateSlider(index, value, text)
   if(index === 2) // min speed
   {
     flock.minSpeed = parseFloat(value);
-    if(flock.minSpeed > flock.maxSpeed) ShowSlider(flockRangeMaxSpeed, flockInputMaxSpeed, flock.maxSpeed = flock.minSpeed);
+    let raised = flock.minSpeed > flock.maxSpeed;
+    if(raised) ShowSlider(flockRangeMaxSpeed, flockInputMaxSpeed, flock.maxSpeed = flock.minSpeed);
+    ShowNotice(speedNotice, raised ? "Max speed was raised to " + flock.maxSpeed + " to stay at or above Min speed." : "");
   }
   if(index === 3) // max speed
   {
     flock.maxSpeed = parseFloat(value);
-    if(flock.maxSpeed < flock.minSpeed) ShowSlider(flockRangeMinSpeed, flockInputMinSpeed, flock.minSpeed = flock.maxSpeed);
+    let lowered = flock.maxSpeed < flock.minSpeed;
+    if(lowered) ShowSlider(flockRangeMinSpeed, flockInputMinSpeed, flock.minSpeed = flock.maxSpeed);
+    ShowNotice(speedNotice, lowered ? "Min speed was lowered to " + flock.minSpeed + " to stay at or below Max speed." : "");
   }
   if(index === 4) flock.seperation = parseFloat(value); // seperation
   if(index === 5) flock.seperationFactor = parseFloat(value); // seperation factor
@@ -999,6 +1041,7 @@ function UpdateSlider(index, value, text)
   if(index === 9) flock.turnFactor = parseFloat(value); // turn
   if(index === 11) flock.box_x = parseFloat(value); // box_x
   if(index === 12) flock.box_y = parseFloat(value); // box_y
+  if(index === 11 || index === 12) ShowBoxNotice();
   if(index === 13) flock.wrap = value; // wrap
   if(index === 14) flock.nearbyBool = value; // show nearby flock
   if(index === 15) flock.closeBool = value; // show close flock
@@ -1014,6 +1057,26 @@ function ShowPending()
   generatePending.style.display = pending ? "" : "none";
 }
 
+// Shows `text` in an inline notice, or hides it when `text` is "".
+function ShowNotice(notice, text)
+{
+  notice.textContent = text;
+  notice.style.display = text === "" ? "none" : "";
+}
+
+// Says when a box inset is wider than this window allows: Flock.BoxInset()
+// then uses a smaller one, which keeps room for the flock between the edges.
+function ShowBoxNotice()
+{
+  let capped = [];
+  let x = flock.BoxInset(flock.box_x, view.width);
+  let y = flock.BoxInset(flock.box_y, view.height);
+  if(x < flock.box_x) capped.push("Box inset X is " + Math.floor(x) + " px");
+  if(y < flock.box_y) capped.push("Box inset Y is " + Math.floor(y) + " px");
+  ShowNotice(boxNotice, capped.length === 0 ? ""
+    : capped.join(" and ") + " at most on this window size, so the flock keeps room to move.");
+}
+
 // Sets a slider and its number field to `value` without firing onchange.
 function ShowSlider(range, text, value)
 {
@@ -1021,11 +1084,13 @@ function ShowSlider(range, text, value)
   text.value = String(value);
 }
 
-// u steps, p pauses and i plays, as the buttons do. Shortcuts with a modifier
-// (Ctrl+P and the like) are left to the browser.
+// u steps, p pauses and i plays, as the buttons do, and Escape closes the
+// settings. Shortcuts with a modifier (Ctrl+P and the like) are left to the
+// browser.
 document.onkeydown = function(event)
 {
   if(event.ctrlKey || event.metaKey || event.altKey) return;
+  if(event.key == "Escape" && settingsMenu.style.display !== "none") Settings(false);
   if(event.key == "u") StepOnce();
   if(event.key == "p") Pause();
   if(event.key == "i") Play();

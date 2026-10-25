@@ -2,20 +2,260 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Sliders and toggles keep the dark accent. Each is at least 44 px tall to
+   tap, the size WCAG 2.5.5 and the platform guidelines ask for. */
 input[type="range"] {
   accent-color: rgb(50,50,50);
-  width: 100px;
+  display: block;
+  width: 100%;
+  height: 2.75rem;
+  margin: 0;
+  cursor: pointer;
   background-color: rgb(250,250,250);
 }
 
 input[type="checkbox"] {
   accent-color: rgb(50,50,50);
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
   background-color: rgb(250,250,250);
 }
 
-input[type="number"] {
-  width: 100px;
-  padding: 2px;
-  text-align: center;
+input[type="radio"] {
+  accent-color: rgb(50,50,50);
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+}
+
+/* A visible focus ring on every control, for keyboard users only. */
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid rgb(50,50,50);
+  outline-offset: 2px;
+}
+
+/* The toolbar: top centre, clear of notches and rounded corners. */
+.toolbar {
+  position: fixed;
+  z-index: 30;
+  top: max(6px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  height: 3.5rem;
+  padding: 0 0.5rem;
+}
+
+/* Icon buttons: a 44 px target around the 24 px icon. */
+.tool {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.5rem;
+  touch-action: manipulation;
+}
+
+.tool:active {
+  transform: scale(0.95);
+}
+
+/* The name of an icon button, below it, on hover (where there is one) and on
+   keyboard focus. Screen readers get the button's aria-label instead. */
+.tooltip {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem;
+  background-color: rgb(50,50,50);
+  color: rgb(250,250,250);
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.tool:focus-visible .tooltip {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .tool:hover {
+    background-color: rgb(235,235,235);
+  }
+
+  .tool:hover .tooltip {
+    opacity: 1;
+  }
+}
+
+/* The settings panel drops below the toolbar and scrolls on its own. --vh is
+   the window height / 100 (main.js), which mobile browsers report more
+   reliably than 100vh. */
+.settings-panel {
+  position: fixed;
+  z-index: 20;
+  top: calc(max(6px, env(safe-area-inset-top)) + 4rem);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: calc(100% - 12px);
+  max-width: 640px;
+  max-height: calc(100vh - 5.5rem);
+  max-height: calc(var(--vh, 1vh) * 100 - 5.5rem - env(safe-area-inset-top));
+  padding: 0.5rem 0.75rem 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* Mostly opaque, so the text keeps its contrast over the flock. */
+  background-color: rgba(250,250,250,0.94);
+}
+
+.settings-groups {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+@media (min-width: 640px) {
+  .settings-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.settings-group {
+  min-width: 0;
+  padding: 0.25rem 0.75rem 0.5rem;
+  border: 1px solid rgb(209,213,219);
+  border-radius: 0.5rem;
+}
+
+.settings-group > legend {
+  padding: 0 0.25rem;
+  font-size: 1.125rem;
+}
+
+.setting {
+  min-width: 0;
+  margin-top: 0.25rem;
+}
+
+.setting-head {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.setting-head .value {
+  margin-left: auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Marks a setting that only applies on Generate. */
+.cue {
+  padding: 0 0.375rem;
+  border: 1px solid rgb(50,50,50);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.cue::before {
+  content: "\21BB\00A0";
+}
+
+.hint {
+  font-size: 0.875rem;
+  color: rgb(75,75,75);
+}
+
+.notice {
+  margin: 0.25rem 0;
+  padding: 0.25rem 0.5rem;
+  border-left: 3px solid rgb(50,50,50);
+  font-size: 0.875rem;
+}
+
+/* A radio or checkbox with its text, 44 px tall to tap. */
+.choice {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+/* Generate stays in view at the bottom while the settings scroll. */
+.generate-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0 max(0.5rem, env(safe-area-inset-bottom));
   background-color: rgb(250,250,250);
+}
+
+.status-message {
+  position: fixed;
+  z-index: 30;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 2rem);
+  max-width: 600px;
+  padding: 0.5rem;
+}
+
+/* A short landscape screen (a phone on its side): the toolbar moves to the
+   top left and the settings to a full-height column on the right, so most
+   of the flock stays in view. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .toolbar {
+    left: max(6px, env(safe-area-inset-left));
+    transform: none;
+  }
+
+  .settings-panel {
+    top: max(6px, env(safe-area-inset-top));
+    left: auto;
+    right: max(6px, env(safe-area-inset-right));
+    transform: none;
+    width: min(380px, 55%);
+    max-height: calc(100vh - 12px);
+    max-height: calc(var(--vh, 1vh) * 100 - 12px);
+  }
+
+  .settings-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Reduced motion: no fades or button press animation. The flock still only
+   moves when Play is pressed, and it starts paused. */
+@media (prefers-reduced-motion: reduce) {
+  .tooltip {
+    transition: none;
+  }
+
+  .tool:active {
+    transform: none;
+  }
 }

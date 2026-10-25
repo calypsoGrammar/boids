@@ -19,7 +19,8 @@ function recordingContext(calls)
   return ctx;
 }
 
-export async function openPage({ build = false, width = 1280, height = 720, devicePixelRatio = 1, seed = 1 } = {})
+// `setup(window)` runs before the page's script, to stub what jsdom lacks.
+export async function openPage({ build = false, width = 1280, height = 720, devicePixelRatio = 1, seed = 1, setup } = {})
 {
   let html = read(build ? 'dist/index.html' : 'index.html');
   // jsdom does not run module scripts, so the one module script becomes a
@@ -46,6 +47,7 @@ export async function openPage({ build = false, width = 1280, height = 720, devi
       window.Math.random = seeded(seed);
       window.requestAnimationFrame = (fn) => { timers.set(nextTimer, fn); return nextTimer++; };
       window.cancelAnimationFrame = (id) => timers.delete(id);
+      setup?.(window);
     },
   });
   const { window } = dom;
@@ -84,6 +86,8 @@ export async function openPage({ build = false, width = 1280, height = 720, devi
       input.dispatchEvent(new window.Event('change'));
     },
     key(key) { window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key })); },
+    // Moves a slider as a drag does: input events only, no change event.
+    drag(id, value) { $(id).value = String(value); $(id).dispatchEvent(new window.Event('input')); },
     visible(id) { return $(id).style.display !== 'none'; },
     close() { window.close(); },
   };

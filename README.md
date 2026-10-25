@@ -26,3 +26,5 @@ how they change the simulation.
 which settings need Generate.
 `docs/audit/BOIDS-V1-06.md` covers the animation loop, the controls, high-DPI
 resizing, the status messages and the performance figures.
+`docs/audit/BOIDS-V1-08.md` covers the responsive layout, the grouped settings
+and the keyboard, touch and screen-reader support of the controls.
