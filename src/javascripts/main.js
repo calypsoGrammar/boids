@@ -19,6 +19,13 @@ const AGENT_RADIUS = 5;
 const MIN_SEPARATION_DISTANCE = 1;
 // Spreads the fallback directions for stopped and overlapping agents.
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+// The coefficients each agent varies, with the slider that sets the flock
+// value and the slider limits (index.html) used when a slider has none.
+const COEFFICIENTS = {
+  seperation: { slider: "flockRangeSeperation", limits: [0, 0.25] },
+  alignment: { slider: "flockRangeAlignment", limits: [0, 0.25] },
+  cohesion: { slider: "flockRangeCohesion", limits: [0, 0.0025] },
+};
 
 class Flock
 {
@@ -82,6 +89,11 @@ class Flock
 
     this.toggle = false;
 
+    // [min, max] of each coefficient in COEFFICIENTS. Start() reads them from
+    // the sliders; an agent's coefficient never leaves them.
+    this.limits = {};
+    for(let key in COEFFICIENTS) this.limits[key] = COEFFICIENTS[key].limits;
+
     // Source of every random draw in Start(). Tests replace it with a seeded
     // or scripted source; the page always uses Math.random.
     this.random = Math.random;
@@ -90,14 +102,26 @@ class Flock
 Start()
 {
   this.Validate();
+  // Species and variance only change here, when a flock is generated.
+  this.raceCount = Number.isFinite(this.raceCount) ? Math.max(1, Math.floor(this.raceCount)) : 1;
+  this.variance = Number.isFinite(this.variance) ? Math.min(Math.max(this.variance, 0), 100) : 0;
+  for(let key in COEFFICIENTS) this.limits[key] = this.SliderLimits(COEFFICIENTS[key]);
+
   let races = [];
 
   for(let i = 0; i < this.raceCount; i++)
   {
-    let r = Math.floor(this.random() * 255);
-    let g = Math.floor(this.random() * 255);
-    let b = Math.floor(this.random() * 255);
-    let col = [r, g, b];
+    // Species are told apart by colour, so a colour already taken is drawn
+    // again.
+    let col;
+    do
+    {
+      let r = Math.floor(this.random() * 255);
+      let g = Math.floor(this.random() * 255);
+      let b = Math.floor(this.random() * 255);
+      col = [r, g, b];
+    }
+    while(races.some((race) => race.every((value, j) => value === col[j])));
     races.push(col);
   }
 
@@ -116,63 +140,16 @@ Start()
     if(this.random() > 0.5) startVW = -startVW;
     if(this.random() > 0.5) startVH = -startVH;
 
-    let s = this.seperation;
-
-    if(this.variance > 0)
-    {
-      let min = parseFloat(document.getElementById("flockRangeSeperation").min);
-      let max = parseFloat(document.getElementById("flockRangeSeperation").max);
-      let range = max - min;
-      let rV = (range / 100) * this.variance;
-      let change = Math.floor(this.random() * (rV * 1000)) / 1000;
-      if(this.random() > 0.5) s -= change;
-      else s += change;
-      if(s < min) s = min;
-      if(s > max) s = max;
-    }
-
-    s = s.toFixed(5);
-
-    let a = this.alignment;
-
-    if(this.variance > 0)
-    {
-      let min = parseFloat(document.getElementById("flockRangeAlignment").min);
-      let max = parseFloat(document.getElementById("flockRangeAlignment").max);
-      let range = max - min;
-      let rV = (range / 100) * this.variance;
-      let change = Math.floor(this.random() * (rV * 1000)) / 1000;
-      if(this.random() > 0.5) a -= change;
-      else a += change;
-      if(a < min) a = min;
-      if(a > max) a = max;
-    }
-
-    a = a.toFixed(5);
-
-    let c = this.cohesion;
-
-    if(this.variance > 0)
-    {
-      let min = parseFloat(document.getElementById("flockRangeCohesion").min);
-      let max = parseFloat(document.getElementById("flockRangeCohesion").max);
-      let range = max - min;
-      let rV = (range / 100) * this.variance;
-      let change = Math.floor(this.random() * (rV * 1000)) / 1000;
-      if(this.random() > 0.5) c -= change;
-      else c += change;
-      if(c < min) c = min;
-      if(c > max) c = max;
-    }
-
-    c = c.toFixed(5);
+    let s = this.VarianceOffset("seperation");
+    let a = this.VarianceOffset("alignment");
+    let c = this.VarianceOffset("cohesion");
 
     let r = Math.floor(this.random() * races.length);
     let newAgent = new FlockAgent(
       i, // index
-      s, // seperation
-      a, // avoidance
-      c, // cohesion
+      s, // seperation offset
+      a, // alignment offset
+      c, // cohesion offset
       120, // vision
       40, // close vision
       ("Agent " + i), // name
@@ -187,6 +164,47 @@ Start()
   }
   this.Update();
   this.DrawFlock(this.shape);
+}
+
+// An agent's offset from the flock value of coefficient `key`: up to
+// variance % of the slider range either way. Two draws (size, then sign)
+// when variance is above 0, none at 0.
+VarianceOffset(key)
+{
+  if(!(this.variance > 0)) return 0;
+  let [min, max] = this.limits[key];
+  let change = this.random() * ((max - min) / 100) * this.variance;
+  return this.random() > 0.5 ? -change : change;
+}
+
+// The [min, max] of a coefficient's slider, or its default limits when the
+// slider has no usable ones.
+SliderLimits(coefficient)
+{
+  let slider = document.getElementById(coefficient.slider);
+  let min = parseFloat(slider && slider.min);
+  let max = parseFloat(slider && slider.max);
+  if(Number.isFinite(min) && Number.isFinite(max) && min <= max) return [min, max];
+  return coefficient.limits;
+}
+
+// The agent's own value of coefficient `key`: the live flock value plus the
+// agent's offset, kept inside the slider limits.
+Coefficient(agent, key)
+{
+  let [min, max] = this.limits[key];
+  let value = this[key] + agent[key + "Offset"];
+  if(!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+// Neighbours of another species count 1 / divisor as much as those of the
+// agent's own species in alignment and cohesion: the bias, when above 1.
+// Bias 0 or 1 (or a bias that is not a finite number) weighs all species the
+// same. Separation ignores species.
+SpeciesDivisor()
+{
+  return Number.isFinite(this.bias) && this.bias > 1 ? this.bias : 1;
 }
 
 Iterate()
@@ -262,8 +280,6 @@ GetNearbyAgents(agent, length)
   if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
   let context = [];
   let closeContext = [];
-  let contextBias = [];
-  let closeContextBias = [];
   let range = agent.vision;
   let tooClose = agent.closeVision;
   for(let i = 0; i < length; i++)
@@ -274,18 +290,11 @@ GetNearbyAgents(agent, length)
     if(xDif < range && yDif < range)
     {
       context.push(i);
-      if(agent.colour === this.agents[i].colour) contextBias.push(i);
-      if(xDif < tooClose && yDif < tooClose)
-      {
-        closeContext.push(i);
-        if(agent.colour === this.agents[i].colour) closeContextBias.push(i);
-      }
+      if(xDif < tooClose && yDif < tooClose) closeContext.push(i);
     }
   }
   agent.nearby = context;
   agent.close = closeContext;
-  agent.nearbyBias = contextBias;
-  agent.closeBias = closeContextBias;
 }
 
 Adjust(agent)
@@ -295,8 +304,9 @@ Adjust(agent)
   agent.vy += steer[1];
 }
 
-// The velocity change [x, y] from separation, alignment and cohesion. Reads
-// the agent and its neighbours and changes nothing.
+// The velocity change [x, y] from separation, alignment and cohesion, with
+// the agent's own coefficients. Reads the agent and its neighbours and
+// changes nothing.
 Steer(agent)
 {
   if(agent.nearby.length === 0) return [0, 0];
@@ -307,6 +317,8 @@ Steer(agent)
   let sep = true;
   let ali = true;
   let coh = true;
+
+  let divisor = this.SpeciesDivisor();
 
   // SEPERATION
   if(sep)
@@ -340,8 +352,8 @@ Steer(agent)
         avoidY += yDif * scale;
       }
 
-      newX += avoidX * this.seperation;
-      newY += avoidY * this.seperation;
+      newX += avoidX * this.Coefficient(agent, "seperation");
+      newY += avoidY * this.Coefficient(agent, "seperation");
     }
   }
 
@@ -350,47 +362,19 @@ Steer(agent)
   {
     let alignX = 0;
     let alignY = 0;
-    let biasCounter = 0;
+    let weight = 0;
 
     for(let i = 0; i < agent.nearby.length; i++)
     {
-      if(this.bias > 0)
-      {
-        if(agent.colour === this.agents[agent.nearby[i]].colour)
-        {
-          alignX += this.agents[agent.nearby[i]].vx;
-          alignY += this.agents[agent.nearby[i]].vy;
-          biasCounter++;
-        }
-        else
-        {
-          alignX += ( this.agents[agent.nearby[i]].vx / this.bias );
-          alignY += ( this.agents[agent.nearby[i]].vy / this.bias );
-          biasCounter += 1/this.bias;
-        }
-      }
-      else
-      {
-        alignX += this.agents[agent.nearby[i]].vx;
-        alignY += this.agents[agent.nearby[i]].vy;
-      }
+      let other = this.agents[agent.nearby[i]];
+      let d = agent.colour === other.colour ? 1 : divisor;
+      alignX += other.vx / d;
+      alignY += other.vy / d;
+      weight += 1 / d;
     }
 
-    let avX, avY;
-
-    if(this.bias > 0)
-    {
-      avX = alignX / biasCounter;
-      avY = alignY / biasCounter;
-    }
-    else
-    {
-      avX = alignX / agent.nearby.length;
-      avY = alignY / agent.nearby.length;
-    }
-
-    newX += ( avX - agent.vx ) * this.alignment;
-    newY += ( avY - agent.vy ) * this.alignment;
+    newX += ( alignX / weight - agent.vx ) * this.Coefficient(agent, "alignment");
+    newY += ( alignY / weight - agent.vy ) * this.Coefficient(agent, "alignment");
   }
 
   // COHESION
@@ -398,47 +382,19 @@ Steer(agent)
   {
     let cohereX = 0;
     let cohereY = 0;
-    let biasCounter = 0;
+    let weight = 0;
 
     for(let i = 0; i < agent.nearby.length; i++)
     {
-      if(this.bias > 0)
-      {
-        if(agent.colour === this.agents[agent.nearby[i]].colour)
-        {
-          cohereX += this.agents[agent.nearby[i]].x;
-          cohereY += this.agents[agent.nearby[i]].y;
-          biasCounter++;
-        }
-        else
-        {
-          cohereX += ( this.agents[agent.nearby[i]].x / this.bias );
-          cohereY += ( this.agents[agent.nearby[i]].y / this.bias );
-          biasCounter += 1/this.bias;
-        }
-      }
-      else
-      {
-        cohereX += this.agents[agent.nearby[i]].x;
-        cohereY += this.agents[agent.nearby[i]].y;
-      }
+      let other = this.agents[agent.nearby[i]];
+      let d = agent.colour === other.colour ? 1 : divisor;
+      cohereX += other.x / d;
+      cohereY += other.y / d;
+      weight += 1 / d;
     }
 
-    let avX, avY;
-
-    if(this.bias > 0)
-    {
-      avX = cohereX / biasCounter;
-      avY = cohereY / biasCounter;
-    }
-    else
-    {
-      avX = cohereX / agent.nearby.length;
-      avY = cohereY / agent.nearby.length;
-    }
-
-    newX += ( avX - agent.x ) * this.cohesion;
-    newY += ( avY - agent.y ) * this.cohesion;
+    newX += ( cohereX / weight - agent.x ) * this.Coefficient(agent, "cohesion");
+    newY += ( cohereY / weight - agent.y ) * this.Coefficient(agent, "cohesion");
   }
   return [newX, newY];
 }
@@ -602,10 +558,10 @@ class FlockAgent
 {
   constructor(
     index, 
-    seperation, 
-    avoidance, 
+    seperationOffset, 
+    alignmentOffset, 
 
-    cohesion, 
+    cohesionOffset, 
     vision, 
     closeVision,
 
@@ -620,10 +576,12 @@ class FlockAgent
     race)
   {
     this.index = index;
-    this.seperation = seperation;
-    this.avoidance = avoidance;
+    // Offsets from the flock's separation, alignment and cohesion, drawn
+    // from the variance on Generate (see Flock.Coefficient()).
+    this.seperationOffset = seperationOffset;
+    this.alignmentOffset = alignmentOffset;
 
-    this.cohesion = cohesion;
+    this.cohesionOffset = cohesionOffset;
     this.vision = vision;
     this.closeVision = closeVision;
 
@@ -639,9 +597,6 @@ class FlockAgent
 
     this.nearby = [];
     this.close = [];
-
-    this.nearbyBias = [];
-    this.closeBias = [];
   }
 }
 
@@ -775,6 +730,7 @@ flockClose.onchange = function(){ UpdateSlider(15,
   flockClose.checked,)
 };
 
+const generatePending = document.getElementById("generatePending");
 const generateButton = document.getElementById("generateButton");
 generateButton.onclick = function(){ Main(); };
 
@@ -839,6 +795,7 @@ function Main()
   // Start() may have lowered a min speed above the max: show what is used.
   if(flock.minSpeed !== minSpeed) ShowSlider(flockRangeMinSpeed, flockInputMinSpeed, flock.minSpeed);
   if(flock.maxSpeed !== maxSpeed) ShowSlider(flockRangeMaxSpeed, flockInputMaxSpeed, flock.maxSpeed);
+  ShowPending();
   document.getElementById('IS_PAUSED').style.display = '';
   document.getElementById('IS_PLAYING').style.display = 'none';
 }
@@ -895,7 +852,8 @@ function ChangeShape()
 function UpdateSlider(index, value, text)
 {
   if(text !== undefined && value !== undefined) text.value = value;
-  if(index === 1) flock.flockSize = parseInt(value); // flock size
+  // Flock size, species and variance only apply on Generate.
+  if(index === 1 || index === 10 || index === 16) ShowPending();
   // The speed slider just moved wins: the other follows so min <= max.
   if(index === 2) // min speed
   {
@@ -913,14 +871,21 @@ function UpdateSlider(index, value, text)
   if(index === 7) flock.cohesion = parseFloat(value); // cohesion
   if(index === 8) flock.bias = parseFloat(value); // bias
   if(index === 9) flock.turnFactor = parseFloat(value); // turn
-  if(index === 10) flock.raceCount = parseInt(value); // race count
   if(index === 11) flock.box_x = parseFloat(value); // box_x
   if(index === 12) flock.box_y = parseFloat(value); // box_y
   if(index === 13) flock.wrap = value; // wrap
   if(index === 14) flock.nearbyBool = value; // show nearby flock
   if(index === 15) flock.closeBool = value; // show close flock
-  if(index === 15) flock.closeBool = value; // show close flock
-  if(index === 16) flock.variance = value; // show close flock
+}
+
+// Shows the Generate notice while the flock size, species or variance
+// sliders differ from what the current flock was generated with.
+function ShowPending()
+{
+  let pending = parseInt(flockSizeRange.value) !== flock.flockSize
+    || parseInt(flockRangeTribes.value) !== flock.raceCount
+    || parseFloat(flockRangeVariance.value) !== flock.variance;
+  generatePending.style.display = pending ? "" : "none";
 }
 
 // Sets a slider and its number field to `value` without firing onchange.

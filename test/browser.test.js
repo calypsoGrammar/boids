@@ -97,6 +97,21 @@ for(const build of [false, true])
     assert.deepEqual(page.errors, []);
   });
 
+  test(`${variant}: the Generate notice shows while species or variance wait for Generate`, async (t) => {
+    const page = await open(t);
+    assert.ok(!page.visible('generatePending'));
+    page.change('flockRangeTribes', 4);
+    assert.ok(page.visible('generatePending'));
+    assert.match(page.$('generatePending').textContent, /Generate/);
+    page.click('generateButton');
+    assert.ok(!page.visible('generatePending'));
+    page.change('flockRangeVariance', 60);
+    assert.ok(page.visible('generatePending'));
+    page.change('flockRangeVariance', 5);
+    assert.ok(!page.visible('generatePending'));
+    assert.deepEqual(page.errors, []);
+  });
+
   test(`${variant}: line and circle shapes, and the direction line`, async (t) => {
     const page = await open(t);
     page.change('flockSizeShapeLine', true);

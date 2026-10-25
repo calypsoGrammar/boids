@@ -11,6 +11,7 @@
 // - "TARGET Dn" tests are marked todo. They state the intended behaviour and
 //   fail until Dn is fixed (BOIDS-V1-04 / V1-05). node --test reports them
 //   as todo and they don't fail the run. A fix removes the todo option.
+//   CAL-1286 (BOIDS-V1-05) fixed the last one, D5.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -19,7 +20,6 @@ import { DEFAULTS, SPECIES, finite, scene, scripted, seeded, snapshot, speed, tu
 
 const near = (actual, expected, message, eps = 1e-12) =>
   assert.ok(Math.abs(actual - expected) <= eps, `${message ?? ''} expected ${expected}, got ${actual}`);
-const todo = (id) => ({ todo: `${id}: fails until fixed, see docs/audit/BOIDS-V1-03.md` });
 const colour = ([r, g, b]) => `rgba(${r},${g},${b}, 1)`;
 // One frame of steering for agents[i] alone, without moving anything.
 function steer(flock, i = 0)
@@ -46,7 +46,8 @@ test('the same random source rebuilds the same flock in a fresh scene', () => {
   const build = (seed) => {
     const { flock } = scene({ flockSize: 30, raceCount: 3, variance: 50, random: seeded(seed) });
     flock.Start();
-    return Array.from(flock.agents, (a) => ({ x: a.x, y: a.y, vx: a.vx, vy: a.vy, colour: a.colour, s: a.seperation, c: a.cohesion }));
+    return Array.from(flock.agents, (a) => ({ x: a.x, y: a.y, vx: a.vx, vy: a.vy, colour: a.colour,
+      s: a.seperationOffset, c: a.cohesionOffset }));
   };
   assert.deepEqual(build(7), build(7));
   assert.notDeepEqual(build(7), build(8));
@@ -181,7 +182,89 @@ test('bias weighs other species 1/bias in alignment and cohesion', () => {
   // Weighted average velocity: (vb + vc / 100) / (1 + 1 / 100).
   near(dvx, -0.1);
   near(dvy, ((1 - 0.01) / 1.01) * 0.1);
-  assert.deepEqual([...flock.agents[0].nearbyBias], [1]);
+});
+
+test('bias between 0 and 1 weighs all species the same, as 0 and 1 do', () => {
+  // A bias below 1 would otherwise make other species count more than the
+  // agent's own, a social rule the simulation does not have.
+  const zero = steer(biasScene(0).flock);
+  for(const bias of [0.5, -3, NaN, Infinity])
+  {
+    const result = steer(biasScene(bias).flock);
+    near(result.dvx, zero.dvx, String(bias));
+    near(result.dvy, zero.dvy, String(bias));
+  }
+});
+
+test('bias only shifts the weight between species in a mixed neighbourhood', () => {
+  // Agent 0 sees two agents of species 1 only: whatever the bias, it aligns
+  // and coheres with them as with its own species.
+  const others = (bias) => steer(scene({ bias, agents: [
+    { x: 100, y: 100, vx: 1, vy: 0, species: 0 },
+    { x: 160, y: 100, vx: 0, vy: 1, species: 1 },
+    { x: 100, y: 160, vx: 0, vy: -2, species: 1 },
+  ] }).flock);
+  for(const bias of [1, 2, 50, 100]) assert.deepEqual(others(bias), others(0), String(bias));
+  // One species: the bias changes nothing.
+  const same = (bias) => steer(scene({ bias, agents: [
+    { x: 100, y: 100, vx: 1, vy: 0 },
+    { x: 160, y: 100, vx: 0, vy: 1 },
+    { x: 100, y: 160, vx: 0, vy: -2 },
+  ] }).flock);
+  for(const bias of [1, 2, 50, 100]) assert.deepEqual(same(bias), same(0), String(bias));
+});
+
+test('a higher bias pulls an agent towards its own species and away from others', () => {
+  // Agent 0 at (100, 100) between one agent of its own species to the right
+  // and three of another species below, all still. Cohesion only.
+  const pull = (bias) => steer(scene({ bias, seperation: 0, alignment: 0, cohesion: 0.001, agents: [
+    { x: 100, y: 100, vx: 0, vy: 0, species: 0 },
+    { x: 160, y: 100, vx: 0, vy: 0, species: 0 },
+    { x: 90, y: 150, vx: 0, vy: 0, species: 1 },
+    { x: 100, y: 150, vx: 0, vy: 0, species: 1 },
+    { x: 110, y: 150, vx: 0, vy: 0, species: 1 },
+  ] }).flock);
+  // Centre (sum x / d, sum y / d) / (1 + 3 / d) with d = max(1, bias).
+  const expected = (d) => [((160 + 300 / d) / (1 + 3 / d) - 100) * 0.001, ((100 + 450 / d) / (1 + 3 / d) - 100) * 0.001];
+  let previous = null;
+  for(const bias of [0, 1, 2, 10, 100])
+  {
+    const { dvx, dvy } = pull(bias);
+    const [ex, ey] = expected(Math.max(1, bias));
+    near(dvx, ex, `x at ${bias}`);
+    near(dvy, ey, `y at ${bias}`);
+    if(previous && bias > 1) assert.ok(dvx > previous.dvx && dvy < previous.dvy, String(bias));
+    previous = { dvx, dvy };
+  }
+});
+
+test('species bias sorts a mixed flock by colour, and bias 0 does not', () => {
+  // The share of each agent's neighbours that are its own species, after a
+  // seeded 3-species flock has run for a while.
+  const ownShare = (bias) => {
+    const { flock, calls } = scene({ flockSize: 90, raceCount: 3, bias, variance: 0, random: seeded(21) });
+    flock.Start();
+    for(let i = 0; i < 600; i++) { calls.length = 0; flock.Update(); }
+    let own = 0, all = 0;
+    for(const agent of flock.agents)
+    {
+      flock.GetNearbyAgents(agent, flock.agents.length);
+      all += agent.nearby.length;
+      own += agent.nearby.filter((i) => flock.agents[i].colour === agent.colour).length;
+      assert.ok(finite(agent));
+    }
+    return own / all;
+  };
+  const unbiased = ownShare(0);
+  const biased = ownShare(100);
+  assert.ok(biased > unbiased + 0.1, `own-species share ${unbiased} at bias 0, ${biased} at bias 100`);
+});
+
+test('neighbour search keeps only the nearby and close lists', () => {
+  const { flock } = biasScene(100);
+  flock.GetNearbyAgents(flock.agents[0], 3);
+  assert.deepEqual(Object.keys(flock.agents[0]).filter((k) => /bias/i.test(k)), []);
+  assert.deepEqual([...flock.agents[0].nearby], [1, 2]);
 });
 
 test('bias 0 and bias 1 both average all species equally', () => {
@@ -531,41 +614,137 @@ test('D9: agents stay on the canvas whatever the box margin', () => {
 
 // --- Per-agent variance ----------------------------------------------------
 
-const varianceFlock = (variance) => {
-  const { flock } = scene({ flockSize: 100, variance, random: seeded(5) });
+const varianceFlock = (variance, seed = 5) => {
+  const { flock } = scene({ flockSize: 100, variance, random: seeded(seed) });
   flock.Start();
   return flock;
 };
+const KEYS = ['seperation', 'alignment', 'cohesion'];
+const coefficients = (flock) => flock.agents.map((a) => KEYS.map((key) => flock.Coefficient(a, key)));
 
 test('variance 0 gives every agent the flock values', () => {
-  for(const agent of varianceFlock(0).agents)
-    assert.deepEqual([agent.seperation, agent.avoidance, agent.cohesion], ['0.10000', '0.10000', '0.00050']);
+  const flock = varianceFlock(0);
+  for(const agent of flock.agents)
+    assert.deepEqual([agent.seperationOffset, agent.alignmentOffset, agent.cohesionOffset], [0, 0, 0]);
+  for(const values of coefficients(flock)) assert.deepEqual(values, [0.1, 0.1, 0.0005]);
 });
 
-test('variance spreads per-agent values inside the slider limits', () => {
-  const agents = varianceFlock(100).agents;
-  const limits = { seperation: [0, 0.25], avoidance: [0, 0.25], cohesion: [0, 0.0025] };
-  for(const [key, [min, max]] of Object.entries(limits))
+test('variance spreads per-agent numbers inside the slider limits', () => {
+  const limits = { seperation: [0, 0.25], alignment: [0, 0.25], cohesion: [0, 0.0025] };
+  for(const variance of [5, 50, 100])
   {
-    const values = agents.map((a) => parseFloat(a[key]));
-    assert.ok(values.every((v) => v >= min && v <= max), key);
-    // Cohesion changes in steps of 0.001 (D5), so it takes only a few values.
-    assert.ok(new Set(values).size > (key === 'cohesion' ? 2 : 10), key + ' varies');
+    const flock = varianceFlock(variance);
+    assert.deepEqual(flock.limits, limits);
+    KEYS.forEach((key, k) => {
+      const [min, max] = limits[key];
+      const offsets = flock.agents.map((a) => a[key + 'Offset']);
+      assert.ok(offsets.every((o) => typeof o === 'number' && Number.isFinite(o)), key);
+      // Each offset is at most variance % of the slider range either way.
+      assert.ok(offsets.every((o) => Math.abs(o) <= ((max - min) * variance) / 100), key);
+      const values = coefficients(flock).map((v) => v[k]);
+      assert.ok(values.every((v) => Number.isFinite(v) && v >= min && v <= max), key);
+      assert.ok(new Set(values).size > 50, `${key} varies at ${variance}`);
+    });
   }
 });
 
-test('KNOWN DEFECT D5: per-agent values are strings that steering never reads', () => {
-  const agents = [{ x: 100, y: 100, vx: 1, vy: 0 }, { x: 160, y: 130, vx: 0, vy: 2 }];
-  const plain = steer(scene({ agents }).flock);
-  const { flock } = scene({ agents });
-  Object.assign(flock.agents[0], { seperation: '0.00000', avoidance: '0.00000', cohesion: '0.00000' });
-  assert.deepEqual(steer(flock), plain);
+test('variance draws are reproducible and grow with the variance', () => {
+  assert.deepEqual(coefficients(varianceFlock(50)), coefficients(varianceFlock(50)));
+  assert.notDeepEqual(coefficients(varianceFlock(50, 5)), coefficients(varianceFlock(50, 6)));
+  // The same draws scaled: the offsets at 50 are ten times those at 5.
+  const small = varianceFlock(5).agents;
+  varianceFlock(50).agents.forEach((a, i) => near(a.cohesionOffset, small[i].cohesionOffset * 10, 'cohesion', 1e-15));
 });
 
-test('TARGET D5: an agent steers with its own separation, alignment and cohesion', todo('D5'), () => {
-  const { flock } = scene({ agents: [{ x: 100, y: 100, vx: 1, vy: 0 }, { x: 160, y: 130, vx: 0, vy: 2 }] });
-  Object.assign(flock.agents[0], { seperation: 0, avoidance: 0, cohesion: 0 });
-  assert.deepEqual(steer(flock), { dvx: 0, dvy: 0 });
+test('D5: an agent steers with its own separation, alignment and cohesion', () => {
+  const agents = (offsets) => [{ x: 100, y: 100, vx: 1, vy: 0, offsets }, { x: 130, y: 110, vx: 0, vy: 2 }];
+  // Offsets of minus the flock values switch every rule off for agent 0.
+  assert.deepEqual(steer(scene({ agents: agents([-0.1, -0.1, -0.0005]) }).flock), { dvx: 0, dvy: 0 });
+  // One rule at a time: an offset scales that rule's part of the steering.
+  const only = (settings, offsets) => steer(scene({ ...settings, agents: agents(offsets) }).flock);
+  for(const [k, settings] of [
+    [0, { alignment: 0, cohesion: 0 }],
+    [1, { seperation: 0, cohesion: 0 }],
+    [2, { seperation: 0, alignment: 0 }],
+  ])
+  {
+    const flockValue = [0.1, 0.1, 0.0005][k];
+    const plain = only(settings, [0, 0, 0]);
+    const offsets = [0, 0, 0];
+    offsets[k] = flockValue;
+    const doubled = only({ ...settings, [KEYS[k]]: flockValue }, offsets);
+    near(doubled.dvx, plain.dvx * 2, KEYS[k], 1e-12);
+    near(doubled.dvy, plain.dvy * 2, KEYS[k], 1e-12);
+    assert.notEqual(plain.dvx, 0, KEYS[k]);
+  }
+});
+
+test('an agent coefficient stays inside the slider limits whatever its offset', () => {
+  const { flock } = scene({ agents: [{ x: 100, y: 100, vx: 1, vy: 0, offsets: [1, -1, NaN] }] });
+  const [agent] = flock.agents;
+  assert.deepEqual(KEYS.map((key) => flock.Coefficient(agent, key)), [0.25, 0, 0]);
+});
+
+test('the flock sliders move every agent, keeping its offset', () => {
+  const flock = varianceFlock(20);
+  const before = coefficients(flock);
+  flock.alignment = 0.15;
+  coefficients(flock).forEach((values, i) => {
+    assert.equal(values[0], before[i][0]);
+    // +0.05, unless the limits cut it.
+    const expected = Math.min(0.25, Math.max(0, 0.15 + flock.agents[i].alignmentOffset));
+    near(values[1], expected, 'alignment', 1e-15);
+  });
+});
+
+test('variance changes how a seeded flock moves', () => {
+  const run = (variance) => {
+    const { flock, calls } = scene({ flockSize: 50, variance, random: seeded(9) });
+    flock.Start();
+    for(let i = 0; i < 300; i++) { calls.length = 0; flock.Update(); }
+    assert.ok(flock.agents.every((a) => finite(a) && speed(a) <= flock.maxSpeed + 1e-9));
+    return snapshot(flock);
+  };
+  assert.deepEqual(run(30), run(30), 'reproducible');
+  // The draws for the colours and the first agent's position are the same,
+  // so any difference comes from the coefficients.
+  assert.notDeepEqual(run(30), run(0));
+});
+
+test('two agents in the same situation steer differently when their offsets differ', () => {
+  // Mirror-image pairs: agent 0 and agent 2 each see one neighbour 30 px
+  // ahead, in their own copy of the scene 400 px apart.
+  const { flock } = scene({ agents: [
+    { x: 100, y: 100, vx: 1, vy: 0, offsets: [0.05, -0.05, 0.0002] },
+    { x: 130, y: 110, vx: 0, vy: 2 },
+    { x: 500, y: 100, vx: 1, vy: 0, offsets: [-0.05, 0.05, -0.0002] },
+    { x: 530, y: 110, vx: 0, vy: 2 },
+  ] });
+  const a = steer(flock, 0);
+  const b = steer(flock, 2);
+  assert.ok(Math.abs(a.dvx - b.dvx) > 1e-3 || Math.abs(a.dvy - b.dvy) > 1e-3, JSON.stringify([a, b]));
+});
+
+// Checksums of four seeded runs at variance 0, recorded from CAL-1285
+// (0f4a714) before the per-agent coefficients and before nearbyBias and
+// closeBias were removed. Same numbers: neither change moves an agent when
+// variance is 0, for bias 0, 7 and 100 and in wrap and turn modes.
+test('variance 0 replays the CAL-1285 trajectories exactly', async () => {
+  const { createHash } = await import('node:crypto');
+  const runs = [
+    [1, 300, { flockSize: 50 }, 'e087a2fb66a2ae49'],
+    [3, 100, { flockSize: 200, raceCount: 10, bias: 100 }, 'a3b05b8aedf1b79d'],
+    [4, 100, { flockSize: 120, raceCount: 3, bias: 0 }, 'a728fa4fcc239bb1'],
+    [5, 100, { flockSize: 120, raceCount: 4, bias: 7, wrap: false, boxX: 100, boxY: 80 }, 'f045f28da24dca2b'],
+  ];
+  for(const [seed, frames, settings, checksum] of runs)
+  {
+    const { flock, calls } = scene({ width: 1280, height: 720, random: seeded(seed), variance: 0, ...settings });
+    flock.Start();
+    for(let i = 0; i < frames; i++) { calls.length = 0; flock.Update(); }
+    const state = new Float64Array(flock.agents.flatMap((a) => [a.x, a.y, a.vx, a.vy]));
+    assert.equal(createHash('sha256').update(state).digest('hex').slice(0, 16), checksum, String(seed));
+  }
 });
 
 // --- Species distributions and flock sizes ---------------------------------
@@ -578,6 +757,36 @@ test('species: each gets its own colour and a share of a 200-agent flock', () =>
     const counts = Object.values(Object.groupBy(flock.agents, (a) => a.colour)).map((g) => g.length);
     assert.equal(counts.length, raceCount);
     assert.ok(Math.min(...counts) >= 200 / raceCount / 2, `${raceCount}: ${counts}`);
+  }
+});
+
+test('species count: no species, fractions and non-numbers still give a valid flock', () => {
+  for(const [raceCount, expected] of [[0, 1], [-2, 1], [NaN, 1], [2.7, 2], [Infinity, 1], [1, 1]])
+  {
+    const { flock } = scene({ flockSize: 30, raceCount, random: seeded(4) });
+    flock.Start();
+    for(let i = 0; i < 20; i++) flock.Update();
+    assert.equal(flock.raceCount, expected, String(raceCount));
+    assert.equal(new Set(flock.agents.map((a) => a.colour)).size, expected, String(raceCount));
+    assert.ok(flock.agents.every(finite), String(raceCount));
+  }
+});
+
+test('species never share a colour', () => {
+  // The second species first draws the first one's colour, then a new one.
+  const { flock } = scene({ flockSize: 40, raceCount: 2, variance: 0,
+    random: scripted([0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.5, 0.6, 0.7, 0.4, 0.4, 0.3, 0.3, 0.6, 0.6, 0.99]) });
+  flock.Start();
+  assert.deepEqual([...new Set(flock.agents.map((a) => a.colour))].sort(), ['rgba(127,153,178, 1)', 'rgba(25,51,76, 1)']);
+});
+
+test('variance outside 0..100 is limited when the flock is generated', () => {
+  for(const [variance, expected] of [[-10, 0], [NaN, 0], ['abc', 0], [250, 100], [30, 30]])
+  {
+    const { flock } = scene({ flockSize: 20, variance, random: seeded(2) });
+    flock.Start();
+    assert.equal(flock.variance, expected, String(variance));
+    assert.ok(coefficients(flock).flat().every(Number.isFinite));
   }
 });
 

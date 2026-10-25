@@ -85,7 +85,9 @@ function compile()
 }
 
 // Creates a Flock with DEFAULTS overridden by `settings`. `agents` are
-// { x, y, vx, vy, species } objects; species indexes SPECIES. Without agents
+// { x, y, vx, vy, species, offsets } objects; species indexes SPECIES and
+// offsets ([seperation, alignment, cohesion], default 0) are the agent's
+// variance offsets from the flock values. Without agents
 // the flock is empty until flock.Start() is called. `calls` records what
 // DrawFlock() draws; clear it when stepping for long.
 export function scene({ width = 800, height = 600, agents = [], random = seeded(1), ...settings } = {})
@@ -95,8 +97,9 @@ export function scene({ width = 800, height = 600, agents = [], random = seeded(
   const flock = new Flock(...ORDER.map((key) => options[key]));
   flock.random = random;
   agents.forEach((a, i) => {
-    flock.agents.push(new FlockAgent(i, flock.seperation.toFixed(5), flock.alignment.toFixed(5),
-      flock.cohesion.toFixed(5), 120, 40, 'Agent ' + i, 5, a.x, a.y, a.vx, a.vy, SPECIES[a.species ?? 0]));
+    const [s, al, c] = a.offsets ?? [0, 0, 0];
+    flock.agents.push(new FlockAgent(i, s, al, c, 120, 40, 'Agent ' + i, 5, a.x, a.y, a.vx, a.vy,
+      SPECIES[a.species ?? 0]));
   });
   return { flock, calls };
 }

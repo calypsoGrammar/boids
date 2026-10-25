@@ -117,12 +117,27 @@ test('alignment, cohesion, separation, bias and boundary sliders apply live', ()
 test('flock size, species and variance only take effect on Generate', () => {
   const page = loadPage();
   page.load();
+  const pending = () => page.elements.generatePending.style.display !== 'none';
+  assert.equal(pending(), false, 'no notice on load');
   page.setSlider('flockSizeRange', 10);
   page.setSlider('flockRangeTribes', 5);
+  page.setSlider('flockRangeVariance', 40);
+  assert.equal(pending(), true, 'notice while they differ');
   assert.equal(page.flock.agents.length, 50);
+  assert.deepEqual([page.flock.flockSize, page.flock.raceCount, page.flock.variance], [50, 2, 5]);
+  assert.equal(new Set(page.flock.agents.map((a) => a.colour)).size, 2);
   page.click('generateButton');
   assert.equal(page.flock.agents.length, 10);
-  assert.equal(page.flock.raceCount, 5);
+  assert.deepEqual([page.flock.raceCount, page.flock.variance], [5, 40]);
+  assert.equal(pending(), false, 'Generate clears the notice');
+  // Moving a slider back to the running value clears it as well.
+  page.setSlider('flockRangeTribes', 3);
+  assert.equal(pending(), true);
+  page.setSlider('flockRangeTribes', 5);
+  assert.equal(pending(), false);
+  // Separation, alignment and cohesion stay live and show no notice.
+  page.setSlider('flockRangeAlignment', 0.2);
+  assert.equal(pending(), false);
 });
 
 test('species become separate colours, and agents of a species share one', () => {
@@ -229,16 +244,18 @@ test('D4: moving one speed slider past the other moves the other with it', () =>
   assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [1.2, 3.7], 'raising max leaves min alone');
 });
 
-test('KNOWN DEFECT D5: variance has no effect on movement', () => {
+test('D5: variance gives agents their own numeric coefficients', () => {
   const page = loadPage();
   page.elements.flockRangeVariance.value = '100';
   page.load();
-  const agent = page.flock.agents[0];
-  // Per-agent values are stored as strings and never read by Adjust().
-  assert.equal(typeof agent.seperation, 'string');
-  assert.equal(typeof agent.cohesion, 'string');
-  const source = page.flock.Adjust.toString();
-  assert.ok(!/agent\.(seperation|avoidance|cohesion)/.test(source));
+  const { flock } = page;
+  assert.equal(flock.variance, 100);
+  for(const key of ['seperation', 'alignment', 'cohesion'])
+  {
+    const values = flock.agents.map((a) => flock.Coefficient(a, key));
+    assert.ok(values.every((v) => typeof v === 'number' && Number.isFinite(v)), key);
+    assert.ok(new Set(values).size > 10, key + ' varies');
+  }
 });
 
 test('KNOWN DEFECT D6: the nearby overlay shows half the real vision range', () => {
