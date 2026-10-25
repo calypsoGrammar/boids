@@ -1,0 +1,81 @@
+# Release to GitHub Pages (https://calypsogrammar.github.io/boids/). Runs only
+# for commits on main: a merge, or a manual run from main. Pull requests never
+# trigger it; their checks are in ci.yml. The build job only reads the
+# repository; the deploy job alone may publish. Needs Settings → Pages →
+# Source set to "GitHub Actions"; see docs/release.md for the settings, the
+# smoke checklist and the rollback steps.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# One release at a time. A newer merge waits instead of cancelling a deploy
+# that has started.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build dist/
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # configure-pages reads the site's URL.
+      pages: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          # The active LTS within package.json engines.
+          node-version: '24'
+          cache: npm
+      - id: pages
+        uses: actions/configure-pages@v5
+      # dist/ is built for /boids/. A custom domain serves the site from /,
+      # where that build loads no script or stylesheet, so stop here until
+      # the cutover in docs/release.md changes the build.
+      - name: Check the Pages path is /boids
+        env:
+          BASE: ${{ steps.pages.outputs.base_path }}
+        run: |
+          if [ "$BASE" != "/boids" ]; then
+            echo "::error::Pages serves this site from '$BASE/', but dist/ is built for /boids/. See docs/release.md, Custom domain."
+            exit 1
+          fi
+      - run: npm ci --no-audit --no-fund
+      - run: npm audit --audit-level=high
+      - run: npm run lint
+      - run: npm run build
+      # Publish exactly the committed dist/: the fresh build must match it,
+      # with no file left out of git.
+      - run: git diff --exit-code -- dist
+      - run: test -z "$(git status --porcelain --ignored -- dist)"
+      - run: npm test
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
