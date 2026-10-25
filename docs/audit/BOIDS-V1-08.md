@@ -87,11 +87,15 @@ invalid flock size and frame error.
 - The toolbar, panel and status message keep clear of notches and home
   indicators (`env(safe-area-inset-*)`, with `viewport-fit=cover`).
 - The panel is the window width less 12 px, up to 640 px. Its height is the
-  window height less the toolbar, through `--vh`, which `main.js` sets from
+  window height less the toolbar (55 % of it in portrait), through `--vh`, which `main.js` sets from
   `innerHeight` (it was set but not used before). It scrolls on its own
   (`overscroll-behavior: contain`), so scrolling it never moves the page.
 - From 640 px wide the groups sit in two columns, so a desktop needs less
   scrolling.
+- **Portrait** (a phone or tablet held upright): the panel is a sheet along
+  the bottom, at most 55 % of the window high, so the top of the flock stays
+  in view while live settings and the overlays change. The status message
+  moves up under the toolbar, clear of the sheet's Generate bar.
 - On a short landscape screen (landscape, at most 520 px high: a phone on its
   side), the toolbar moves to the top left. The panel becomes a full-height
   column on the right, up to 380 px or 55 % wide, so most of the flock stays
@@ -143,22 +147,30 @@ jsdom:
   window, and Play, Step, Settings, every slider at its maximum, the
   overlays and Generate all work
 
-jsdom does no layout, so the layout is checked in the built CSS: the
-layering, the panel's scrolling and height, the two-column and landscape
-layouts, the 44 px targets, the focus and tooltip rules, the reduced-motion
-rules and the panel's opacity. `test/tooling.test.js` now expects only the
-`startButton` hook class to be missing from the CSS.
+`test/layout.test.js` (new) opens the committed build under `/boids/` in
+headless Chromium (Playwright, from `/usr/local/lib/node_modules/playwright`)
+at the same nine sizes, with DPR 2, and measures:
 
-### Manual check
+- the canvas box equals the window, the backing store is 2×, and the page
+  never scrolls, with the settings closed or open
+- the toolbar and the open settings lie inside the window and do not overlap
+- the flock stays in view while the settings are open: in portrait the band
+  above the sheet is at least 35 % of the height; on a short landscape screen
+  the panel starts at least 35 % across; elsewhere at least 35 % of the area
+  is uncovered
+- every visible `.tool`, slider and `.choice`, and Generate, is at least
+  44 × 44 px
+- the panel scrolls to its end with the mouse wheel while the page stays put,
+  and Generate is in view and takes a real click
+- no setting row is wider than its group, and the panel never scrolls
+  sideways (320 px included)
+- Tab focus gives each toolbar button a solid outline and a fully opaque
+  tooltip inside the window
+- with `reducedMotion: 'reduce'` a pressed button has no transform and the
+  tooltip has no transition. Without it, a press scales the button to 0.95.
 
-No browser was available on the Archon runner, so check these by hand in
-browser dev tools at the sizes above:
-
-1. The toolbar shows three buttons, and keyboard Tab shows a focus ring and
-   tooltip on each.
-2. The settings open below the toolbar, or on the right on a phone in
-   landscape. They scroll inside themselves, Generate stays visible, and
-   nothing is cut off at 320 px wide.
-3. The canvas fills the window with no scrollbars, and it is sharp at DPR 2
-   and 3.
-4. With reduced motion set in the OS, the buttons do not scale when pressed.
+The file skips itself when Playwright is not installed, as on the GitHub CI
+runner, where only the jsdom tests run. `test/ui.test.js` also checks the
+CSS rules behind these.
+`test/tooling.test.js` now expects only the `startButton` hook class to be
+missing from the CSS.

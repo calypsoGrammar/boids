@@ -1,8 +1,7 @@
 // Responsive layout and accessible controls for CAL-1289 (BOIDS-V1-08): the
 // real markup in jsdom (test/browser.js), from source and from the committed
-// build, plus the rules in the built CSS. jsdom does no layout, so sizes and
-// positions are checked as CSS rules; see docs/audit/BOIDS-V1-08.md for the
-// manual viewport checklist.
+// build, plus the rules in the built CSS. jsdom does no layout: the measured
+// sizes, overlap and scrolling are checked in Chromium by test/layout.test.js.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

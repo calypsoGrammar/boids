@@ -224,6 +224,28 @@ input:focus-visible {
   padding: 0.5rem;
 }
 
+/* Portrait (a phone or a tablet held upright): the settings are a sheet
+   along the bottom, at most 55 % of the window high, so the top of the flock
+   stays in view while they change. The status moves up under the toolbar,
+   clear of the sheet's Generate bar. */
+@media (orientation: portrait) {
+  .settings-panel {
+    top: auto;
+    bottom: max(6px, env(safe-area-inset-bottom));
+    max-height: 55vh;
+    max-height: calc(var(--vh, 1vh) * 55);
+  }
+
+  .generate-bar {
+    padding-bottom: 0.5rem;
+  }
+
+  .status-message {
+    top: calc(max(6px, env(safe-area-inset-top)) + 4rem);
+    bottom: auto;
+  }
+}
+
 /* A short landscape screen (a phone on its side): the toolbar moves to the
    top left and the settings to a full-height column on the right, so most
    of the flock stays in view. */
