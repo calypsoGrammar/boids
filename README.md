@@ -20,3 +20,5 @@ any source change.
 Tests run with `node --test` and need no browser or network. See
 `docs/audit/BOIDS-V1-03.md` for the physics fixtures, the browser smoke tests
 and the `KNOWN DEFECT` / `TARGET` naming.
+`docs/audit/BOIDS-V1-04.md` lists the speed, separation and edge fixes and
+how they change the simulation.

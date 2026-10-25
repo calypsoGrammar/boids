@@ -1,4 +1,5 @@
-// Deterministic physics tests for CAL-1284 (BOIDS-V1-03). Every scene has
+// Deterministic physics tests for CAL-1284 (BOIDS-V1-03), updated for the
+// fixes of CAL-1285 (BOIDS-V1-04, docs/audit/BOIDS-V1-04.md). Every scene has
 // fixed agents (test/fixtures.js) or a seeded Flock.random, so each run
 // replays exactly.
 //
@@ -59,9 +60,17 @@ test('Start() maps random draws to colours, positions and signed speeds', () => 
   flock.Start();
   const [agent] = flock.agents;
   assert.equal(agent.colour, 'rgba(25,51,76, 1)');
-  // Spawned at (200, 450) with v = (-2, max(0.5, 0.25)), then Start() runs
-  // one Update().
-  assert.deepEqual(snapshot(flock), [{ x: 198, y: 450.5, vx: -2, vy: 0.5 }]);
+  // Spawned inside the box edges 5..795 and 5..595: (5 + floor(0.25 * 790),
+  // 5 + floor(0.75 * 590)) = (202, 447), with v = (-2, max(0.5, 0.25)).
+  // Start() then runs one Update().
+  assert.deepEqual(snapshot(flock), [{ x: 200, y: 447.5, vx: -2, vy: 0.5 }]);
+});
+
+test('Start() spawns every agent inside the box', () => {
+  const { flock } = scene({ flockSize: 200, boxX: 150, boxY: 100, random: seeded(3) });
+  flock.Start();
+  // The box edges are 155..645 and 105..495; one Update() moves at most 2.5.
+  assert.ok(flock.agents.every((a) => a.x >= 152.5 && a.x <= 647.5 && a.y >= 102.5 && a.y <= 497.5));
 });
 
 // --- A single agent, no neighbours -----------------------------------------
@@ -93,12 +102,26 @@ test('separation pushes a close pair apart, equally and oppositely', () => {
     { x: 110, y: 104, vx: 1, vy: 0 },
   ] });
   const a = steer(flock, 0);
-  // seperation * factor / delta, per axis: 0.1 * 10 / -10 and 0.1 * 10 / -4.
-  near(a.dvx, -0.1);
-  near(a.dvy, -0.25);
+  // seperation * factor / distance, away from the neighbour:
+  // 0.1 * 10 * (-10, -4) / |(-10, -4)|^2 = (-10, -4) / 116.
+  near(a.dvx, -10 / 116);
+  near(a.dvy, -4 / 116);
   const b = steer(flock, 1);
-  near(b.dvx, 0.1);
-  near(b.dvy, 0.25);
+  near(b.dvx, 10 / 116);
+  near(b.dvy, 4 / 116);
+});
+
+test('separation strength falls with distance, the same in every direction', () => {
+  const push = (x, y) => {
+    const { dvx, dvy } = steer(scene({ alignment: 0, cohesion: 0, agents: [
+      { x: 100, y: 100, vx: 1, vy: 0 }, { x, y, vx: 1, vy: 0 }] }).flock);
+    return Math.hypot(dvx, dvy);
+  };
+  // 0.1 * 10 / distance.
+  near(push(120, 100), 0.05, 'along x');
+  near(push(100, 80), 0.05, 'along y');
+  near(push(100 + 20 / Math.SQRT2, 100 + 20 / Math.SQRT2), 0.05, 'diagonal', 1e-12);
+  near(push(110, 100), 0.1, 'half the distance');
 });
 
 test('separation only acts inside the 40 px close square', () => {
@@ -201,30 +224,83 @@ test('speeds between minSpeed and maxSpeed are left alone', () => {
   }
 });
 
-test('KNOWN DEFECT D2: a speed below minSpeed is rescaled from the new vx', () => {
-  const agent = clamp(0.12, 0.16);
-  near(agent.vx, 0.3);
-  near(agent.vy, 0.75, 'vy should be 0.4');
-});
-
-test('TARGET D2: a speed below minSpeed is scaled up to it, keeping the heading', todo('D2'), () => {
+test('D2: a speed below minSpeed is scaled up to it, keeping the heading', () => {
   const agent = clamp(0.12, 0.16);
   near(agent.vx, 0.3);
   near(agent.vy, 0.4);
 });
 
-test('KNOWN DEFECT D2: a zero velocity becomes NaN', () => {
-  const agent = clamp(0, 0);
-  assert.ok(Number.isNaN(agent.vx) && Number.isNaN(agent.x));
-});
-
-test('TARGET D2: a zero velocity leaves the agent finite at minSpeed', todo('D2'), () => {
+test('D2: a zero velocity leaves the agent finite at minSpeed', () => {
   const agent = clamp(0, 0);
   assert.ok(finite(agent));
-  near(speed(agent), DEFAULTS.minSpeed, 'speed', 1e-9);
+  near(speed(agent), DEFAULTS.minSpeed, 'speed', 1e-12);
 });
 
-test('TARGET D1: Generate keeps the 0.5 / 2.5 speed defaults', todo('D1'), () => {
+test('D2: a zero velocity starts along a fixed direction picked from the index', () => {
+  const heading = (index) => {
+    const { flock } = scene({ agents: [{ x: 400, y: 300, vx: 0, vy: 0 }] });
+    const [agent] = flock.agents;
+    agent.index = index;
+    flock.MovePosition(agent);
+    return [agent.vx, agent.vy];
+  };
+  assert.deepEqual(heading(0), [0.5, 0]);
+  assert.deepEqual(heading(3), heading(3));
+  assert.notDeepEqual(heading(3), heading(4));
+});
+
+test('D2: with minSpeed 0 a stopped agent stays where it is', () => {
+  const { flock } = scene({ minSpeed: 0, agents: [{ x: 400, y: 300, vx: 0, vy: 0 }] });
+  flock.MovePosition(flock.agents[0]);
+  assert.deepEqual(snapshot(flock), [{ x: 400, y: 300, vx: 0, vy: 0 }]);
+});
+
+test('D2: a non-finite velocity is replaced by a finite one inside the limits', () => {
+  for(const [vx, vy] of [[NaN, 1], [Infinity, 0], [-Infinity, Infinity]])
+  {
+    const agent = clamp(vx, vy);
+    assert.ok(finite(agent), `${vx}, ${vy}`);
+    near(speed(agent), DEFAULTS.minSpeed, `${vx}, ${vy}`, 1e-12);
+  }
+});
+
+test('D2: both speed limits hold for any velocity, with fractional limits', () => {
+  const random = seeded(9);
+  for(let i = 0; i < 500; i++)
+  {
+    const { flock } = scene({ minSpeed: 0.7, maxSpeed: 1.3, agents: [{ x: 400, y: 300,
+      vx: (random() - 0.5) * 10 ** (random() * 6 - 3), vy: (random() - 0.5) * 10 ** (random() * 6 - 3) }] });
+    const [agent] = flock.agents;
+    const before = { vx: agent.vx, vy: agent.vy };
+    flock.MovePosition(agent);
+    assert.ok(speed(agent) >= 0.7 - 1e-12 && speed(agent) <= 1.3 + 1e-12, String(speed(agent)));
+    assert.ok(turnAngle(before, agent) < 1e-9, 'heading kept');
+  }
+});
+
+test('D4: Validate() lowers a minSpeed above maxSpeed and repairs non-finite settings', () => {
+  const settle = (settings) => {
+    const { flock } = scene({ agents: [], ...settings });
+    flock.Validate();
+    return [flock.minSpeed, flock.maxSpeed, flock.box_x, flock.box_y];
+  };
+  assert.deepEqual(settle({}), [0.5, 2.5, 0, 0], 'the defaults are kept');
+  assert.deepEqual(settle({ minSpeed: 0.3, maxSpeed: 0.7 }), [0.3, 0.7, 0, 0], 'fractions are kept');
+  assert.deepEqual(settle({ minSpeed: 9, maxSpeed: 2 }), [2, 2, 0, 0]);
+  assert.deepEqual(settle({ minSpeed: NaN, maxSpeed: Infinity }), [0.5, 2.5, 0, 0]);
+  assert.deepEqual(settle({ minSpeed: -1, maxSpeed: '3' }), [0, 2.5, 0, 0]);
+  assert.deepEqual(settle({ boxX: -20, boxY: NaN }), [0.5, 2.5, 0, 0]);
+});
+
+test('D4: Update() validates the settings before stepping', () => {
+  const { flock } = scene({ agents: [{ x: 400, y: 300, vx: 3, vy: 4 }] });
+  flock.minSpeed = 9;
+  flock.maxSpeed = 2;
+  flock.Update();
+  near(speed(flock.agents[0]), 2, 'speed', 1e-12);
+});
+
+test('D1: Generate keeps the 0.5 / 2.5 speed defaults', () => {
   const page = loadPage();
   page.load();
   assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [0.5, 2.5]);
@@ -240,21 +316,115 @@ for(const [name, b] of [
 {
   const pair = () => scene({ agents: [{ x: 100, y: 100, vx: 1, vy: 0.5 }, { ...b, vx: -0.5, vy: 1 }] }).flock;
 
-  test(`KNOWN DEFECT D3: two close agents on ${name} become NaN`, () => {
+  // The pair may be closing faster than one frame of separation can stop,
+  // so "separate" is checked on the push itself and over time.
+  test(`D3: two close agents on ${name} stay finite and are pushed apart`, () => {
     const flock = pair();
-    flock.Update();
-    assert.ok(!finite(flock.agents[0]));
-  });
+    const [a, b] = flock.agents;
+    flock.alignment = 0;
+    flock.cohesion = 0;
+    const pa = steer(flock, 0);
+    const pb = steer(flock, 1);
+    assert.ok([pa.dvx, pa.dvy, pb.dvx, pb.dvy].every(Number.isFinite));
+    near(pa.dvx, -pb.dvx, 'equal and opposite x');
+    near(pa.dvy, -pb.dvy, 'equal and opposite y');
+    assert.ok(Math.hypot(pa.dvx, pa.dvy) > 0, 'pushed');
+    // Away from the other agent (any direction will do at the same point).
+    if(b.x !== a.x || b.y !== a.y) assert.ok(pa.dvx * (b.x - a.x) + pa.dvy * (b.y - a.y) < 0);
 
-  test(`TARGET D3: two close agents on ${name} stay finite and separate`, todo('D3'), () => {
-    const flock = pair();
-    const gap = () => Math.hypot(flock.agents[0].x - flock.agents[1].x, flock.agents[0].y - flock.agents[1].y);
-    const before = gap();
-    flock.Update();
-    assert.ok(flock.agents.every(finite));
-    assert.ok(gap() >= before);
+    const gap = () => Math.hypot(a.x - b.x, a.y - b.y);
+    for(let i = 0; i < 100; i++)
+    {
+      flock.Update();
+      assert.ok(flock.agents.every(finite), 'frame ' + i);
+    }
+    assert.ok(gap() >= 20, 'apart after 100 frames: ' + gap());
   });
 }
+
+test('D3: the push is capped for agents closer than one pixel', () => {
+  const push = (dx) => {
+    const { dvx, dvy } = steer(scene({ alignment: 0, cohesion: 0, agents: [
+      { x: 100, y: 100, vx: 1, vy: 0 }, { x: 100 + dx, y: 100, vx: 1, vy: 0 }] }).flock);
+    return Math.hypot(dvx, dvy);
+  };
+  // seperation * factor / 1 at most.
+  for(const dx of [1, 0.5, 1e-9, 1e-300, 0]) near(push(dx), 1, String(dx));
+});
+
+test('D3: a stack of agents on one point spreads out, deterministically and finitely', () => {
+  const run = () => {
+    const agents = Array.from({ length: 12 }, () => ({ x: 400, y: 300, vx: 0, vy: 0 }));
+    const { flock } = scene({ agents });
+    for(let i = 0; i < 60; i++)
+    {
+      flock.Update();
+      assert.ok(flock.agents.every(finite), 'frame ' + i);
+    }
+    return snapshot(flock);
+  };
+  const first = run();
+  assert.deepEqual(run(), first);
+  assert.equal(new Set(first.map(({ x, y }) => x + ',' + y)).size, 12, 'no two agents share a point');
+});
+
+test('D3: a default 200-agent flock on whole-pixel spawns keeps every agent (seeds 1-5)', () => {
+  for(const seed of [1, 2, 3, 4, 5])
+  {
+    const { flock } = scene({ flockSize: 200, width: 1280, height: 720, random: seeded(seed) });
+    flock.Start();
+    for(let i = 0; i < 50; i++) flock.Update();
+    assert.ok(flock.agents.every(finite), 'seed ' + seed);
+  }
+});
+
+// --- One consistent state per tick -----------------------------------------
+
+test('every agent steers from the state at the start of the tick', () => {
+  const agents = [
+    { x: 100, y: 100, vx: 1, vy: 0.5 },
+    { x: 112, y: 104, vx: 0.2, vy: 1.4 },
+    { x: 130, y: 90, vx: -0.7, vy: 0.9 },
+    { x: 104, y: 125, vx: 0.3, vy: -1.1, species: 1 },
+  ];
+  // Each agent's steering, computed from the untouched start state.
+  const { flock: still } = scene({ agents });
+  const expected = still.agents.map((agent) => {
+    still.GetNearbyAgents(agent, still.agents.length);
+    const [dvx, dvy] = still.Steer(agent);
+    return [agent.vx + dvx, agent.vy + dvy];
+  });
+  const { flock } = scene({ agents });
+  flock.Update();
+  flock.agents.forEach((agent, i) => {
+    const [vx, vy] = expected[i];
+    const s = Math.hypot(vx, vy);
+    const limited = Math.min(Math.max(s, flock.minSpeed), flock.maxSpeed);
+    near(agent.vx, vx / s * limited, 'vx ' + i, 1e-12);
+    near(agent.vy, vy / s * limited, 'vy ' + i, 1e-12);
+  });
+});
+
+test('the order of the agents does not change where they go', () => {
+  const agents = [
+    { x: 300.25, y: 200.75, vx: 1.2, vy: 0.7, species: 0 },
+    { x: 330.5, y: 215, vx: 0.9, vy: 1.1, species: 0 },
+    { x: 352, y: 181.5, vx: 1.4, vy: -0.3, species: 1 },
+    { x: 280, y: 238, vx: -0.6, vy: 1.3, species: 1 },
+    { x: 309.75, y: 200.75, vx: -1.1, vy: -0.8, species: 0 },
+    { x: 250.5, y: 161, vx: 0.5, vy: 1.5, species: 1 },
+  ];
+  const run = (list) => {
+    const { flock } = scene({ agents: list });
+    for(let i = 0; i < 100; i++) flock.Update();
+    return snapshot(flock);
+  };
+  const forward = run(agents);
+  const backward = run([...agents].reverse()).reverse();
+  forward.forEach((a, i) => {
+    for(const k of ['x', 'y', 'vx', 'vy']) near(backward[i][k], a[k], `${k} ${i}`, 1e-9);
+  });
+});
 
 // --- Edges: wrap and turn --------------------------------------------------
 
@@ -307,14 +477,52 @@ test('turn mode with a large box margin brings an agent back within a bounded ov
   assert.ok(agent.x > 0 && agent.x < 800 && agent.y > 0 && agent.y < 600);
 });
 
-test('KNOWN DEFECT D9: a box margin over half the canvas leaves an inverted box', () => {
+test('D9: a box margin over half the canvas is capped to leave a 10 px box', () => {
   const { flock } = scene({ width: 375, height: 667, boxX: 200, agents: [{ x: 180, y: 300, vx: 1, vy: 0 }] });
+  // The inset is capped at 375 / 2 - 10 = 177.5: edges 182.5 and 192.5.
+  assert.deepEqual(flock.Edges(200, 375, 5), [182.5, 192.5]);
   flock.DetectEdgeCollisions(flock.agents[0]);
-  // 180 < 5 + 200, so it is wrapped to 375 - 5 - 200 = 170 and back again.
-  assert.equal(flock.agents[0].x, 170);
+  assert.equal(flock.agents[0].x, 192.5);
+  flock.DetectEdgeCollisions(flock.agents[0]);
+  assert.equal(flock.agents[0].x, 192.5, 'and it stays there');
 });
 
-test('TARGET D9: agents stay on the canvas whatever the box margin', todo('D9'), () => {
+test('D9: box edges follow the canvas size, down to a canvas smaller than an agent', () => {
+  const { flock } = scene({ agents: [] });
+  assert.deepEqual(flock.Edges(0, 800, 5), [5, 795]);
+  assert.deepEqual(flock.Edges(100, 800, 5), [105, 695]);
+  assert.deepEqual(flock.Edges(500, 800, 5), [395, 405]);
+  assert.deepEqual(flock.Edges(0, 20, 5), [5, 15]);
+  assert.deepEqual(flock.Edges(30, 20, 5), [5, 15]);
+  assert.deepEqual(flock.Edges(0, 8, 5), [4, 4], 'collapsed to the middle');
+  assert.deepEqual(flock.Edges(0, 0, 5), [0, 0]);
+});
+
+test('D9: the drawn box is the capped box', () => {
+  const { flock, calls } = scene({ width: 375, height: 200, boxX: 500, boxY: 60, agents: [] });
+  flock.DrawFlock('circle');
+  assert.deepEqual(calls.find(([name]) => name === 'rect'), ['rect', 177.5, 60, 20, 80]);
+});
+
+for(const wrap of [true, false])
+{
+  test(`D9: agents stay finite and come back on a tiny or shrinking canvas (${wrap ? 'wrap' : 'turn'})`, () => {
+    const { flock } = scene({ wrap, width: 800, height: 600, boxX: 40, boxY: 40, flockSize: 50, random: seeded(2) });
+    flock.Start();
+    for(const [w, h] of [[120, 90], [12, 9], [3, 2], [0, 0], [320, 240]])
+    {
+      flock.width = w;
+      flock.height = h;
+      for(let i = 0; i < 400; i++) flock.Update();
+      assert.equal(flock.agents.length, 50);
+      assert.ok(flock.agents.every(finite), `${w} × ${h}`);
+    }
+    // Back on a usable canvas, every agent is on it again.
+    assert.ok(flock.agents.every((a) => a.x >= 0 && a.x <= 320 && a.y >= 0 && a.y <= 240));
+  });
+}
+
+test('D9: agents stay on the canvas whatever the box margin', () => {
   const { flock } = scene({ width: 375, height: 667, boxX: 500, boxY: 500, random: seeded(1), flockSize: 20 });
   flock.Start();
   for(let i = 0; i < 100; i++) flock.Update();
@@ -385,7 +593,8 @@ test('extreme flock sizes: 0 and 1 agents run without errors', () => {
 });
 
 // Flock-wide invariants with the intended settings over several seeds. They
-// fail today through D2 (speeds outside the limits) and D3 (NaN agents).
+// failed before CAL-1285 through D2 (speeds outside the limits) and D3 (NaN
+// agents).
 const invariantRuns = [
   ['50 agents, wrap', { flockSize: 50 }, 1000],
   ['50 agents, turn, box 150', { flockSize: 50, wrap: false, boxX: 150, boxY: 150 }, 1000],
@@ -393,7 +602,7 @@ const invariantRuns = [
 ];
 for(const [name, settings, frames] of invariantRuns)
 {
-  test(`TARGET D2/D3: ${name} stays finite, on the canvas and inside the speed limits`, todo('D2, D3'), () => {
+  test(`D2/D3: ${name} stays finite, on the canvas and inside the speed limits`, () => {
     for(const seed of [1, 2, 3, 4, 5])
     {
       const { flock } = scene({ ...settings, random: seeded(seed) });
@@ -415,10 +624,11 @@ for(const [name, settings, frames] of invariantRuns)
 
 // --- Regression trajectory -------------------------------------------------
 
-// Six agents of two species, fractional positions so no two share an axis
-// (D3), and minSpeed 0 so the min clamp never runs (D2). Any change to the
-// rules, the edges or the speed clamp moves these numbers. If a fix changes
-// them on purpose, replace GOLDEN with the "actual" value from the failure.
+// Six agents of two species with fractional positions, and minSpeed 0 so the
+// min clamp never runs. Recorded again for CAL-1285 (vector separation and
+// one state per tick). Any change to the rules, the edges or the speed clamp
+// moves these numbers. If a fix changes them on purpose, replace GOLDEN with
+// the "actual" value from the failure.
 const GOLDEN_AGENTS = [
   { x: 300.5, y: 200.25, vx: 1.2, vy: 0.7, species: 0 },
   { x: 330.75, y: 215.5, vx: 0.9, vy: 1.1, species: 0 },
@@ -428,12 +638,12 @@ const GOLDEN_AGENTS = [
   { x: 250.8125, y: 160.4375, vx: 0.5, vy: 1.5, species: 1 },
 ];
 const GOLDEN = [
-  { x: 403.8244664181651, y: 375.9769715631104, vx: 0.4868981132540339, vy: 0.9946482105004784 },
-  { x: 439.4468126684552, y: 410.7906689618342, vx: 0.5068119886172888, vy: 1.0232636871140646 },
-  { x: 371.2388700537475, y: 297.255169893001, vx: 0.05560779991514665, vy: 0.7177036489389238 },
-  { x: 328.4389521979729, y: 331.01480026072863, vx: 0.27813475949184774, vy: 0.544587890500839 },
-  { x: 475.8581332714907, y: 445.67658439085744, vx: 0.5202492704968581, vy: 1.06174700482028 },
-  { x: 323.07185344232624, y: 291.0462598017891, vx: 0.30535052089476555, vy: 0.7517381702001428 },
+  { x: 389.5605746409004, y: 306.6493133690321, vx: 0.43322209345259, vy: 0.5150282996032911 },
+  { x: 410.39737064119015, y: 346.51547579596496, vx: 0.3614222639921819, vy: 0.6537949571076873 },
+  { x: 422.1732258089145, y: 305.51363567448146, vx: 0.34125929139810335, vy: 0.5436608856591736 },
+  { x: 368.49819864152863, y: 346.59868887427706, vx: 0.4387242045524675, vy: 0.5258273292761453 },
+  { x: 450.431778715177, y: 345.3848899410847, vx: 0.36413374360168005, vy: 0.6184674005639793 },
+  { x: 350.37972292423296, y: 306.68853222471114, vx: 0.39635269591783334, vy: 0.6502129576133624 },
 ];
 
 test('a fixed six-agent scene replays the recorded 200-frame trajectory', () => {

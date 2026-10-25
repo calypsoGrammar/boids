@@ -10,6 +10,16 @@ window.addEventListener('DOMContentLoaded', CalculateVh);
 window.addEventListener('resize', CalculateVh);
 window.addEventListener('orientationchange', CalculateVh);
 
+// Speeds used when a setting is not a number: the index.html defaults.
+const DEFAULT_MIN_SPEED = 0.5;
+const DEFAULT_MAX_SPEED = 2.5;
+const AGENT_RADIUS = 5;
+// Separation treats neighbours closer than this (px) as this far away, so the
+// push stays finite when two agents overlap.
+const MIN_SEPARATION_DISTANCE = 1;
+// Spreads the fallback directions for stopped and overlapping agents.
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
 class Flock
 {
   constructor(
@@ -79,6 +89,7 @@ class Flock
 
 Start()
 {
+  this.Validate();
   let races = [];
 
   for(let i = 0; i < this.raceCount; i++)
@@ -92,10 +103,14 @@ Start()
 
   this.agents.length = 0;
 
+  // Agents start inside the box, so none starts out wrapped or turning.
+  let [left, right] = this.Edges(this.box_x, this.width, AGENT_RADIUS);
+  let [top, bottom] = this.Edges(this.box_y, this.height, AGENT_RADIUS);
+
   for(let i = 0; i < this.flockSize; i++)
   {
-    let startW = Math.floor(this.random() * this.width);
-    let startH = Math.floor(this.random() * this.height);
+    let startW = left + Math.floor(this.random() * (right - left));
+    let startH = top + Math.floor(this.random() * (bottom - top));
     let startVW = Math.max(this.minSpeed, this.random() * this.maxSpeed);
     let startVH = Math.max(this.minSpeed, this.random() * this.maxSpeed);
     if(this.random() > 0.5) startVW = -startVW;
@@ -161,7 +176,7 @@ Start()
       120, // vision
       40, // close vision
       ("Agent " + i), // name
-      5, // radius
+      AGENT_RADIUS, // radius
       startW, // start x position
       startH, // start y position
       startVW, // start x vector velocity
@@ -202,14 +217,40 @@ Toggle()
   }
 }
 
+// Makes the speed limits and box insets usable: finite, not negative, and
+// minSpeed no higher than maxSpeed (maxSpeed is the hard limit, so a min
+// above it is lowered to it). Runs before every step.
+Validate()
+{
+  let min = Number.isFinite(this.minSpeed) ? Math.max(0, this.minSpeed) : DEFAULT_MIN_SPEED;
+  let max = Number.isFinite(this.maxSpeed) ? Math.max(0, this.maxSpeed) : DEFAULT_MAX_SPEED;
+  this.minSpeed = Math.min(min, max);
+  this.maxSpeed = max;
+  this.box_x = Number.isFinite(this.box_x) ? Math.max(0, this.box_x) : 0;
+  this.box_y = Number.isFinite(this.box_y) ? Math.max(0, this.box_y) : 0;
+}
+
+// One tick. Every agent finds its neighbours and steers from the state at the
+// start of the tick, then all of them move, so the result does not depend on
+// the order of the agents.
 Update()
 {
+  this.Validate();
   let len = this.agents.length;
-  for(let i = 0; i < this.agents.length; i++)
+  let steerX = new Float64Array(len);
+  let steerY = new Float64Array(len);
+  for(let i = 0; i < len; i++)
   {
     this.agents[i].outBox = false;
     this.GetNearbyAgents(this.agents[i], len);
-    this.Adjust(this.agents[i]);
+    let steer = this.Steer(this.agents[i]);
+    steerX[i] = steer[0];
+    steerY[i] = steer[1];
+  }
+  for(let i = 0; i < len; i++)
+  {
+    this.agents[i].vx += steerX[i];
+    this.agents[i].vy += steerY[i];
     this.DetectEdgeCollisions(this.agents[i]);
     this.MovePosition(this.agents[i]);
   }
@@ -249,7 +290,16 @@ GetNearbyAgents(agent, length)
 
 Adjust(agent)
 {
-  if(agent.nearby.length === 0) return;
+  let steer = this.Steer(agent);
+  agent.vx += steer[0];
+  agent.vy += steer[1];
+}
+
+// The velocity change [x, y] from separation, alignment and cohesion. Reads
+// the agent and its neighbours and changes nothing.
+Steer(agent)
+{
+  if(agent.nearby.length === 0) return [0, 0];
 
   let newX = 0
   let newY = 0;
@@ -268,11 +318,26 @@ Adjust(agent)
 
       for(let i = 0; i < agent.close.length; i++)
       {
-        let xDif = agent.x - this.agents[agent.close[i]].x;
-        let yDif = agent.y - this.agents[agent.close[i]].y;
+        let other = this.agents[agent.close[i]];
+        let xDif = agent.x - other.x;
+        let yDif = agent.y - other.y;
+        let dist = Math.sqrt(xDif * xDif + yDif * yDif);
 
-        avoidX += this.seperationFactor / xDif;
-        avoidY += this.seperationFactor / yDif;
+        if(dist === 0)
+        {
+          // Same point: push the pair apart along a direction picked from
+          // their indices, opposite for each of the two.
+          let angle = GOLDEN_ANGLE * (agent.index + other.index);
+          let sign = agent.index < other.index ? 1 : -1;
+          xDif = sign * Math.cos(angle);
+          yDif = sign * Math.sin(angle);
+          dist = 1;
+        }
+
+        // Away from the neighbour with strength factor / distance.
+        let scale = this.seperationFactor / (Math.max(dist, MIN_SEPARATION_DISTANCE) * dist);
+        avoidX += xDif * scale;
+        avoidY += yDif * scale;
       }
 
       newX += avoidX * this.seperation;
@@ -375,42 +440,60 @@ Adjust(agent)
     newX += ( avX - agent.x ) * this.cohesion;
     newY += ( avY - agent.y ) * this.cohesion;
   }
-  agent.vx += newX;
-  agent.vy += newY;
+  return [newX, newY];
+}
+
+// The box inset used on a canvas axis of `size` px: the setting, capped so
+// the box keeps at least two agent radii of room between its inside edges.
+BoxInset(inset, size, radius = AGENT_RADIUS)
+{
+  return Math.min(inset, Math.max(0, size / 2 - 2 * radius));
+}
+
+// The inside edges [low, high] of the box on one axis for an agent of
+// `radius`. A canvas too small to fit the agent collapses them to its middle.
+Edges(inset, size, radius)
+{
+  let low = radius + this.BoxInset(inset, size, radius);
+  let high = size - low;
+  if(high < low) low = high = size / 2;
+  return [low, high];
 }
 
 DetectEdgeCollisions(agent)
 {
-  if(agent.x < agent.radius + this.box_x)
+  let [left, right] = this.Edges(this.box_x, this.width, agent.radius);
+  let [top, bottom] = this.Edges(this.box_y, this.height, agent.radius);
+  if(agent.x < left)
   {
-    if(this.wrap) agent.x = this.width - agent.radius - this.box_x;
+    if(this.wrap) agent.x = right;
     else
     {
       agent.vx += this.turnFactor;
       agent.outBox = true;
     }
   }
-  else if(agent.x > (this.width - agent.radius - this.box_x))
+  else if(agent.x > right)
   {
-    if(this.wrap) agent.x = agent.radius + this.box_x;
+    if(this.wrap) agent.x = left;
     else
     {
       agent.vx -= this.turnFactor;
       agent.outBox = true;
     }
   }
-  if(agent.y < agent.radius + this.box_y)
+  if(agent.y < top)
   {
-    if(this.wrap) agent.y = this.height - agent.radius - this.box_y;
+    if(this.wrap) agent.y = bottom;
     else
     {
       agent.vy += this.turnFactor;
       agent.outBox = true;
     }
   }
-  else if(agent.y > (this.height - agent.radius - this.box_y))
+  else if(agent.y > bottom)
   {
-    if(this.wrap) agent.y = agent.radius + this.box_y;
+    if(this.wrap) agent.y = top;
     else
     {
       agent.vy -= this.turnFactor;
@@ -419,21 +502,26 @@ DetectEdgeCollisions(agent)
   }
 }
 
+// Clamps the speed to [minSpeed, maxSpeed], keeping the heading, then moves.
 MovePosition(agent)
 {
   let speed = Math.sqrt( 
   ( agent.vx * agent.vx) + 
   ( agent.vy * agent.vy)
   );
-  if(speed > this.maxSpeed)
+  if(!Number.isFinite(speed) || (speed === 0 && this.minSpeed > 0))
   {
-    agent.vx = ( agent.vx / speed ) * this.maxSpeed;
-    agent.vy = ( agent.vy / speed ) * this.maxSpeed;
+    // No heading to keep: use a fixed direction picked from the index.
+    let angle = GOLDEN_ANGLE * agent.index;
+    agent.vx = Math.cos(angle) * this.minSpeed;
+    agent.vy = Math.sin(angle) * this.minSpeed;
+    speed = this.minSpeed;
   }
-  if(speed < this.minSpeed)
+  let limited = Math.min(Math.max(speed, this.minSpeed), this.maxSpeed);
+  if(limited !== speed)
   {
-    agent.vx = ( agent.vx / speed ) * this.minSpeed;
-    agent.vy = ( agent.vx / speed ) * this.minSpeed;
+    agent.vx = ( agent.vx / speed ) * limited;
+    agent.vy = ( agent.vy / speed ) * limited;
   }
   agent.x += agent.vx;
   agent.y += agent.vy;
@@ -445,8 +533,10 @@ DrawFlock(style)
 
   c.strokeStyle = "#d1d5db";
 
+  let boxX = this.BoxInset(this.box_x, this.width);
+  let boxY = this.BoxInset(this.box_y, this.height);
   c.beginPath();
-  c.rect(this.box_x, this.box_y, (this.width - (this.box_x * 2)), (this.height - (this.box_y * 2)));
+  c.rect(boxX, boxY, (this.width - (boxX * 2)), (this.height - (boxY * 2)));
   c.stroke();
 
   let debugDirection = true;
@@ -707,8 +797,8 @@ function Main()
   let shape = ChangeShape();
 
   let flockSize = parseInt(document.getElementById("flockSizeRange").value);
-  let minSpeed = parseInt(document.getElementById("flockRangeMinSpeed").value);
-  let maxSpeed = parseInt(document.getElementById("flockRangeMaxSpeed").value);
+  let minSpeed = parseFloat(document.getElementById("flockRangeMinSpeed").value);
+  let maxSpeed = parseFloat(document.getElementById("flockRangeMaxSpeed").value);
   let seperation = parseFloat(document.getElementById("flockRangeSeperation").value);
   let seperationF = parseFloat(document.getElementById("flockRangeSeperationFactor").value);
   let alignment = parseFloat(document.getElementById("flockRangeAlignment").value);
@@ -718,7 +808,7 @@ function Main()
   let turn = parseFloat(document.getElementById("flockRangeTurn").value);
   let tribes = parseInt(document.getElementById("flockRangeTribes").value);
   let boxX = parseFloat(document.getElementById("flockRangeBoxX").value);
-  let boxY = parseInt(document.getElementById("flockRangeBoxY").value);
+  let boxY = parseFloat(document.getElementById("flockRangeBoxY").value);
   let wrap = document.getElementById("flockWrap").checked;
   let nearby = document.getElementById("flockNearby").checked;
   let close = document.getElementById("flockClose").checked;
@@ -746,6 +836,9 @@ function Main()
   );
 
   flock.Start();
+  // Start() may have lowered a min speed above the max: show what is used.
+  if(flock.minSpeed !== minSpeed) ShowSlider(flockRangeMinSpeed, flockInputMinSpeed, flock.minSpeed);
+  if(flock.maxSpeed !== maxSpeed) ShowSlider(flockRangeMaxSpeed, flockInputMaxSpeed, flock.maxSpeed);
   document.getElementById('IS_PAUSED').style.display = '';
   document.getElementById('IS_PLAYING').style.display = 'none';
 }
@@ -803,8 +896,17 @@ function UpdateSlider(index, value, text)
 {
   if(text !== undefined && value !== undefined) text.value = value;
   if(index === 1) flock.flockSize = parseInt(value); // flock size
-  if(index === 2) flock.minSpeed = parseInt(value); // min speed
-  if(index === 3) flock.maxSpeed = parseInt(value); // max speed
+  // The speed slider just moved wins: the other follows so min <= max.
+  if(index === 2) // min speed
+  {
+    flock.minSpeed = parseFloat(value);
+    if(flock.minSpeed > flock.maxSpeed) ShowSlider(flockRangeMaxSpeed, flockInputMaxSpeed, flock.maxSpeed = flock.minSpeed);
+  }
+  if(index === 3) // max speed
+  {
+    flock.maxSpeed = parseFloat(value);
+    if(flock.maxSpeed < flock.minSpeed) ShowSlider(flockRangeMinSpeed, flockInputMinSpeed, flock.minSpeed = flock.maxSpeed);
+  }
   if(index === 4) flock.seperation = parseFloat(value); // seperation
   if(index === 5) flock.seperationFactor = parseFloat(value); // seperation factor
   if(index === 6) flock.alignment = parseFloat(value); // alignment
@@ -812,13 +914,20 @@ function UpdateSlider(index, value, text)
   if(index === 8) flock.bias = parseFloat(value); // bias
   if(index === 9) flock.turnFactor = parseFloat(value); // turn
   if(index === 10) flock.raceCount = parseInt(value); // race count
-  if(index === 11) flock.box_x = parseInt(value); // box_x
-  if(index === 12) flock.box_y = parseInt(value); // box_y
+  if(index === 11) flock.box_x = parseFloat(value); // box_x
+  if(index === 12) flock.box_y = parseFloat(value); // box_y
   if(index === 13) flock.wrap = value; // wrap
   if(index === 14) flock.nearbyBool = value; // show nearby flock
   if(index === 15) flock.closeBool = value; // show close flock
   if(index === 15) flock.closeBool = value; // show close flock
   if(index === 16) flock.variance = value; // show close flock
+}
+
+// Sets a slider and its number field to `value` without firing onchange.
+function ShowSlider(range, text, value)
+{
+  range.value = String(value);
+  text.value = String(value);
 }
 
 document.onkeydown = function(event)
