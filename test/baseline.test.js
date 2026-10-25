@@ -3,6 +3,8 @@
 // docs/audit/BOIDS-V1-01.md. A "KNOWN DEFECT" test asserts the current, wrong
 // behaviour so the fix ticket that corrects it has to update the test on
 // purpose; the defect ID matches the inventory in the audit document.
+// CAL-1285 (BOIDS-V1-04) fixed D1-D4 and D9; their tests now pin the fixed
+// behaviour (docs/audit/BOIDS-V1-04.md).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPage } from './harness.js';
@@ -151,19 +153,22 @@ test('resizing the window resizes the canvas and the flock bounds', () => {
   assert.deepEqual([page.flock.width, page.flock.height], [800, 600]);
 });
 
-test('KNOWN DEFECT D1: min and max speed are truncated to whole numbers', () => {
+test('D1: min and max speed keep their fractions, in the flock and the number fields', () => {
   const page = loadPage();
   page.load();
-  // Sliders default to 0.5 and 2.5, read with parseInt.
-  assert.equal(page.flock.minSpeed, 0);
-  assert.equal(page.flock.maxSpeed, 2);
+  assert.equal(page.flock.minSpeed, 0.5);
+  assert.equal(page.flock.maxSpeed, 2.5);
   page.setSlider('flockRangeMaxSpeed', 0.8);
-  assert.equal(page.flock.maxSpeed, 0);
-  page.click('nextButton');
-  assert.ok(page.flock.agents.every((a) => speed(a) === 0), 'a max speed below 1 freezes the flock');
+  page.setSlider('flockRangeMinSpeed', 0.3);
+  assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [0.3, 0.8]);
+  assert.deepEqual([page.elements.flockInputMinSpeed.value, page.elements.flockInputMaxSpeed.value], ['0.3', '0.8']);
+  for(let i = 0; i < 20; i++) page.click('nextButton');
+  assert.ok(page.flock.agents.every((a) => speed(a) >= 0.3 - 1e-12 && speed(a) <= 0.8 + 1e-12), 'the flock moves inside 0.3-0.8');
+  page.click('generateButton');
+  assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [0.3, 0.8], 'Generate reads the fractions');
 });
 
-test('KNOWN DEFECT D2: the min speed clamp scales vy from the new vx', () => {
+test('D2: the min speed clamp keeps the heading', () => {
   const page = loadPage();
   page.elements.flockSizeRange.value = '1';
   page.elements.flockRangeMinSpeed.value = '3';
@@ -173,11 +178,11 @@ test('KNOWN DEFECT D2: the min speed clamp scales vy from the new vx', () => {
   Object.assign(agent, { vx: 0.3, vy: 0.4 });
   page.flock.MovePosition(agent);
   assert.ok(Math.abs(agent.vx - 1.8) < 1e-9);
-  assert.ok(Math.abs(agent.vy - 10.8) < 1e-9, 'vy should be 2.4');
-  assert.ok(speed(agent) > page.flock.maxSpeed);
+  assert.ok(Math.abs(agent.vy - 2.4) < 1e-9);
+  assert.ok(Math.abs(speed(agent) - 3) < 1e-9);
 });
 
-test('KNOWN DEFECT D3: two close agents on the same x or y become NaN and vanish', () => {
+test('D3: two close agents on the same x or y stay finite', () => {
   const page = loadPage();
   page.elements.flockSizeRange.value = '2';
   page.load();
@@ -185,24 +190,43 @@ test('KNOWN DEFECT D3: two close agents on the same x or y become NaN and vanish
   Object.assign(a, { x: 100, y: 100, vx: 1, vy: 1 });
   Object.assign(b, { x: 100, y: 120, vx: 1, vy: 1 });
   page.flock.Update();
-  assert.ok(!finite(a));
+  assert.ok(finite(a) && finite(b));
 });
 
-test('KNOWN DEFECT D3: a default 200-agent flock loses agents on its first frame (seed 2)', () => {
+test('D3: a default 200-agent flock keeps every agent (seed 2)', () => {
   // Spawn positions are whole pixels, so equal coordinates are common.
   const page = loadPage({ seed: 2 });
   page.elements.flockSizeRange.value = '200';
   page.load();
-  assert.ok(page.flock.agents.some((a) => !finite(a)));
+  page.click('IS_PAUSED');
+  page.tick(500);
+  assert.equal(page.flock.agents.length, 200);
+  assert.ok(page.flock.agents.every(finite));
 });
 
-test('KNOWN DEFECT D4: min speed above max speed wins over max speed', () => {
+test('D4: Generate lowers a min speed above the max speed to it, and shows it', () => {
   const page = loadPage({ seed: 1 });
   page.elements.flockRangeMinSpeed.value = '9';
   page.elements.flockRangeMaxSpeed.value = '2';
   page.load();
+  assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [2, 2]);
+  assert.equal(page.elements.flockRangeMinSpeed.value, '2');
+  assert.equal(page.elements.flockInputMinSpeed.value, '2');
   page.click('nextButton');
-  assert.ok(page.flock.agents.some((a) => speed(a) > 2));
+  assert.ok(page.flock.agents.every((a) => Math.abs(speed(a) - 2) < 1e-12));
+});
+
+test('D4: moving one speed slider past the other moves the other with it', () => {
+  const page = loadPage();
+  page.load();
+  page.setSlider('flockRangeMinSpeed', 4.5);
+  assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [4.5, 4.5]);
+  assert.deepEqual([page.elements.flockRangeMaxSpeed.value, page.elements.flockInputMaxSpeed.value], ['4.5', '4.5']);
+  page.setSlider('flockRangeMaxSpeed', 1.2);
+  assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [1.2, 1.2]);
+  assert.deepEqual([page.elements.flockRangeMinSpeed.value, page.elements.flockInputMinSpeed.value], ['1.2', '1.2']);
+  page.setSlider('flockRangeMaxSpeed', 3.7);
+  assert.deepEqual([page.flock.minSpeed, page.flock.maxSpeed], [1.2, 3.7], 'raising max leaves min alone');
 });
 
 test('KNOWN DEFECT D5: variance has no effect on movement', () => {
@@ -247,12 +271,30 @@ test('KNOWN DEFECT D8: keyboard shortcuts leave the play/pause button out of syn
   assert.equal(page.timers.size, 0, 'so pressing Play pauses it');
 });
 
-test('KNOWN DEFECT D9: a boundary box wider than half the canvas pushes agents off screen', () => {
+test('D9: a boundary box wider than half the canvas keeps agents on screen', () => {
   const page = loadPage({ width: 375, height: 667 });
   page.load();
   page.setSlider('flockRangeBoxX', 500);
-  page.click('nextButton');
-  // Every agent is wrapped to the same x = 375 - 5 - 500, left of the canvas,
-  // which also lines agents up for D3.
-  assert.ok(page.flock.agents.every((a) => !(a.x >= 0 && a.x <= 375)));
+  for(let i = 0; i < 100; i++) page.click('nextButton');
+  // The inset is capped at 375 / 2 - 10, leaving a 10 px wide box.
+  assert.ok(page.flock.agents.every((a) => finite(a) && a.x >= 180 && a.x <= 195));
+  assert.equal(page.flock.box_x, 500, 'the setting itself is kept for a larger window');
+  page.resize(1280, 720);
+  page.setCheckbox('flockWrap', false);
+  for(let i = 0; i < 100; i++) page.click('nextButton');
+  assert.ok(page.flock.agents.every((a) => finite(a) && a.x >= 0 && a.x <= 1280));
+});
+
+test('D9: shrinking the window to a few pixels and back loses no agents', () => {
+  const page = loadPage({ width: 800, height: 600 });
+  page.load();
+  page.click('IS_PAUSED');
+  for(const [w, h] of [[200, 150], [6, 4], [0, 0], [1024, 768]])
+  {
+    page.resize(w, h);
+    page.tick(200);
+    assert.equal(page.flock.agents.length, 50);
+    assert.ok(page.flock.agents.every(finite), `${w} × ${h}`);
+  }
+  assert.ok(page.flock.agents.every((a) => a.x >= 0 && a.x <= 1024 && a.y >= 0 && a.y <= 768));
 });
