@@ -1,9 +1,5 @@
 "use strict";
 
-import Alpine from 'alpinejs'
-window.Alpine = Alpine
-Alpine.start()
-
 function CalculateVh()
 {
   let vh = window.innerHeight * 0.01;

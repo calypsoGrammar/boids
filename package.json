@@ -3,20 +3,26 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test test/*.test.js"
+    "lint": "eslint .",
+    "test": "node --test test/*.test.js",
+    "audit:high": "npm audit --audit-level=high",
+    "check": "npm run lint && npm test && npm run build",
+    "check:clean": "npm ci --no-audit --no-fund && npm run check"
   },
   "devDependencies": {
-    "vite": "^4.1.0"
-  },
-  "dependencies": {
-    "alpinejs": "^3.13.7",
-    "autoprefixer": "^10.4.13",
-    "postcss": "^8.4.21",
-    "postcss-cli": "^10.1.0",
-    "tailwindcss": "^3.2.7"
+    "@eslint/js": "^10.0.1",
+    "autoprefixer": "^10.6.1",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "postcss": "^8.5.31",
+    "tailwindcss": "^3.4.19",
+    "vite": "^8.3.5"
   }
 }
