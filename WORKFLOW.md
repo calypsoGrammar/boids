@@ -20,8 +20,13 @@ archon:
   verify:
     setup:
       - npm ci --no-audit --no-fund
+    # The same checks as the pull request CI (.github/workflows/ci.yml),
+    # minus npm audit, which needs the registry. npm run build rewrites the
+    # committed dist/, so a change that skips the rebuild leaves it modified.
     commands:
+      - npm run lint
       - npm run build
+      - npm test
   claude:
     # The npm registry, so Claude implementers can upgrade dependencies.
     # Codex turns never have network access.
@@ -73,4 +78,4 @@ This is attempt {{ attempt }}. Earlier attempts were discarded, and this workspa
 Issue description:
 {{ issue.description }}
 
-Boids is a static browser flocking simulation built with Vite, Alpine and Tailwind. Make focused changes, add tests where the ticket's behaviour can be checked, run `npm run build`, and commit your work. npm can reach the npm registry when you run under Claude; commit the updated lockfile with any dependency change.
+Boids is a static browser flocking simulation built with Vite and Tailwind (Node ^22.13.0 or >=24). Make focused changes, add tests where the ticket's behaviour can be checked, run `npm run check` (lint, test, build), and commit your work, including any rebuilt `dist/` files. npm can reach the npm registry when you run under Claude; commit the updated lockfile with any dependency change.
