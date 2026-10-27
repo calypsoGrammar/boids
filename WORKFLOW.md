@@ -68,7 +68,7 @@ archon:
     # An issue labelled "Stack: Allowed" may start on its one unfinished
     # blocker's open pull request once that blocker is In Review (archon-v3
     # docs/operator-guide.md, Stacking). Stacks are one level deep.
-    enabled: true
+    mode: single
 ---
 You are working on Boids, Linear issue {{ issue.identifier }}: {{ issue.title }}.
 {% if attempt %}
