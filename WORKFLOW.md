@@ -27,6 +27,21 @@ archon:
       - npm run lint
       - npm run build
       - npm test
+  preview:
+    # How to run the app: screenshots of the reviewed commit for Archon's
+    # evidence (archon-v3 docs/workflow-reference.md, Preview evidence), and a
+    # Spiderweb review preview. The before_run hook has installed dependencies.
+    # The preview is built with base / into node_modules/.preview-dist, which
+    # git ignores, so it is served from the root and the committed dist/ is left
+    # as it is. Python's static file server serves the build on the loopback
+    # address.
+    setup:
+      - npx vite build --base=/ --outDir node_modules/.preview-dist --emptyOutDir
+    start: exec python3 -m http.server --bind 127.0.0.1 --directory node_modules/.preview-dist {port}
+    health_path: /
+    routes:
+      - { name: home, path: / }
+    video: false
   claude:
     # The npm registry, so Claude implementers can upgrade dependencies.
     # Codex turns never have network access.
