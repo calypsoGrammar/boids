@@ -4,9 +4,9 @@
 # Archon never auto-merges a change to it. Every key is described in
 # archon-v3's docs/workflow-reference.md.
 tracker:
-  kind: linear
+  kind: chronology
   provider:
-    # Linear project "Boids".
+    # Work Registry project "Boids".
     project_id: "6bfab08c-43d8-4a98-81b9-316d87bcb95b"
 hooks:
   # Each attempt starts from a fresh checkout; install dependencies so the
@@ -85,7 +85,7 @@ archon:
     # docs/operator-guide.md, Stacking). Stacks are one level deep.
     mode: single
 ---
-You are working on Boids, Linear issue {{ issue.identifier }}: {{ issue.title }}.
+You are working on Boids, issue {{ issue.identifier }}: {{ issue.title }}.
 {% if attempt %}
 This is attempt {{ attempt }}. Earlier attempts were discarded, and this workspace is a fresh checkout.
 {% endif %}
