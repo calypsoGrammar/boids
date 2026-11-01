@@ -290,14 +290,17 @@ Step()
   let grid = len >= GRID_MIN_AGENTS && this.BuildGrid(len);
   if(this.steerOut === undefined) this.steerOut = new Float64Array(2);
   let out = this.steerOut;
-  for(let i = 0; i < len; i++)
+  if(grid) this.SteerAllGrid(len, out, steerX, steerY);
+  else
   {
-    this.agents[i].outBox = false;
-    if(grid) this.GetNearbyAgentsGrid(this.agents[i]);
-    else this.GetNearbyAgents(this.agents[i], len);
-    this.SteerInto(this.agents[i], out, grid ? this.grid : null);
-    steerX[i] = out[0];
-    steerY[i] = out[1];
+    for(let i = 0; i < len; i++)
+    {
+      this.agents[i].outBox = false;
+      this.GetNearbyAgents(this.agents[i], len);
+      this.SteerInto(this.agents[i], out);
+      steerX[i] = out[0];
+      steerY[i] = out[1];
+    }
   }
   let edges = null; // the box edges, worked out once per agent radius
   for(let i = 0; i < len; i++)
@@ -390,14 +393,21 @@ BuildGrid(length)
       ys: new Float64Array(length),
       vxs: new Float64Array(length),
       vys: new Float64Array(length),
+      species: new Int32Array(length),
       items: new Int32Array(length),
       found: new Int32Array(9 * length),
+      fx: new Float64Array(9 * length),
+      fy: new Float64Array(9 * length),
       start: new Int32Array(count + 1),
       fill: new Int32Array(count + 1),
       from: new Int32Array(count + 1),
     };
   }
-  let { cellOf, xs, ys, vxs, vys, items, found, start, fill, from } = grid;
+  let { cellOf, xs, ys, vxs, vys, species, items, found, fx, fy, start, fill, from } = grid;
+  // Species numbered by colour identity, for Steer's same-species test.
+  let colours = [];
+  let lastColour = null;
+  let lastId = -1;
   start.fill(0, 0, count + 1);
   for(let i = 0; i < length; i++)
   {
@@ -406,6 +416,13 @@ BuildGrid(length)
     ys[i] = a.y;
     vxs[i] = a.vx;
     vys[i] = a.vy;
+    if(a.colour !== lastColour)
+    {
+      lastColour = a.colour;
+      lastId = colours.indexOf(lastColour);
+      if(lastId < 0) lastId = colours.push(lastColour) - 1;
+    }
+    species[i] = lastId;
     if(!Number.isFinite(a.x) || !Number.isFinite(a.y))
     {
       cellOf[i] = -1;
@@ -449,6 +466,13 @@ BuildGrid(length)
         found[j] = v;
       }
     }
+    // The candidates' positions, aligned with found, so the filter reads
+    // them in sequence.
+    for(let k = from[c]; k < n; k++)
+    {
+      fx[k] = xs[found[k]];
+      fy[k] = ys[found[k]];
+    }
   }
   from[count] = n;
   grid.minX = minX;
@@ -465,7 +489,7 @@ GetNearbyAgentsGrid(agent)
   if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
   let context = agent.nearby;
   let closeContext = agent.close;
-  let { minX, minY, cell, cols, from, found, xs, ys } = this.grid;
+  let { minX, minY, cell, cols, from, found, fx, fy } = this.grid;
   let range = agent.vision;
   let tooClose = agent.closeVision;
   let x = agent.x;
@@ -486,9 +510,9 @@ GetNearbyAgentsGrid(agent)
   {
     let i = found[k];
     if(i == agent.index) continue;
-    let xDif = Math.abs(x - xs[i]);
+    let xDif = Math.abs(x - fx[k]);
     if(xDif >= range) continue;
-    let yDif = Math.abs(y - ys[i]);
+    let yDif = Math.abs(y - fy[k]);
     if(yDif < range)
     {
       context[nc++] = i;
@@ -497,6 +521,135 @@ GetNearbyAgentsGrid(agent)
   }
   if(context.length !== nc) context.length = nc;
   if(closeContext.length !== ncl) closeContext.length = ncl;
+}
+
+// Neighbour search and steering for every agent from the grid of this tick,
+// writing the steering into steerX and steerY. Same lists and same sums as
+// GetNearbyAgentsGrid() followed by SteerInto(), but the grid fields are read
+// once and the neighbours' state comes from the grid's typed copies, so it
+// touches no agent objects but the agent's own.
+SteerAllGrid(len, out, steerX, steerY)
+{
+  let agents = this.agents;
+  let { minX, minY, cell, cols, from, found, fx, fy, xs, ys, vxs, vys, species } = this.grid;
+  let width = this.width;
+  let height = this.height;
+  let divisor = this.SpeciesDivisor();
+  let separationFactor = this.seperationFactor;
+  for(let a = 0; a < len; a++)
+  {
+    let agent = agents[a];
+    agent.outBox = false;
+    let x = agent.x;
+    let y = agent.y;
+    // As GetNearbyAgentsGrid: an agent off the canvas keeps its lists.
+    if(x < 0 || x > width || y < 0 || y > height)
+    {
+      this.SteerInto(agent, out);
+      steerX[a] = out[0];
+      steerY[a] = out[1];
+      continue;
+    }
+    let context = agent.nearby;
+    let closeContext = agent.close;
+    let nc = 0;
+    let ncl = 0;
+    if(Number.isFinite(x) && Number.isFinite(y))
+    {
+      let range = agent.vision;
+      let tooClose = agent.closeVision;
+      let c = Math.floor((y - minY) / cell) * cols + Math.floor((x - minX) / cell);
+      let end = from[c + 1];
+      for(let k = from[c]; k < end; k++)
+      {
+        let i = found[k];
+        if(i == agent.index) continue;
+        let xDif = Math.abs(x - fx[k]);
+        if(xDif >= range) continue;
+        let yDif = Math.abs(y - fy[k]);
+        if(yDif < range)
+        {
+          context[nc++] = i;
+          if(xDif < tooClose && yDif < tooClose) closeContext[ncl++] = i;
+        }
+      }
+    }
+    if(context.length !== nc) context.length = nc;
+    if(closeContext.length !== ncl) closeContext.length = ncl;
+    if(nc === 0)
+    {
+      steerX[a] = 0;
+      steerY[a] = 0;
+      continue;
+    }
+
+    let mine = species[a];
+    let newX = 0;
+    let newY = 0;
+
+    // SEPERATION
+    if(ncl > 0)
+    {
+      let avoidX = 0;
+      let avoidY = 0;
+      for(let n = 0; n < ncl; n++)
+      {
+        let j = closeContext[n];
+        let xDif = x - xs[j];
+        let yDif = y - ys[j];
+        let dist = Math.sqrt(xDif * xDif + yDif * yDif);
+        if(dist === 0)
+        {
+          let angle = GOLDEN_ANGLE * (agent.index + agents[j].index);
+          let sign = agent.index < agents[j].index ? 1 : -1;
+          xDif = sign * Math.cos(angle);
+          yDif = sign * Math.sin(angle);
+          dist = 1;
+        }
+        let scale = separationFactor / (Math.max(dist, MIN_SEPARATION_DISTANCE) * dist);
+        avoidX += xDif * scale;
+        avoidY += yDif * scale;
+      }
+      let seperation = this.Coefficient(agent, "seperation");
+      newX += avoidX * seperation;
+      newY += avoidY * seperation;
+    }
+
+    // ALIGNMENT and COHESION
+    let alignX = 0;
+    let alignY = 0;
+    let weight = 0;
+    let cohereX = 0;
+    let cohereY = 0;
+    for(let n = 0; n < nc; n++)
+    {
+      let j = context[n];
+      if(species[j] === mine)
+      {
+        alignX += vxs[j];
+        alignY += vys[j];
+        cohereX += xs[j];
+        cohereY += ys[j];
+        weight += 1;
+      }
+      else
+      {
+        alignX += vxs[j] / divisor;
+        alignY += vys[j] / divisor;
+        cohereX += xs[j] / divisor;
+        cohereY += ys[j] / divisor;
+        weight += 1 / divisor;
+      }
+    }
+    let alignment = this.Coefficient(agent, "alignment");
+    newX += ( alignX / weight - agent.vx ) * alignment;
+    newY += ( alignY / weight - agent.vy ) * alignment;
+    let cohesion = this.Coefficient(agent, "cohesion");
+    newX += ( cohereX / weight - x ) * cohesion;
+    newY += ( cohereY / weight - y ) * cohesion;
+    steerX[a] = newX;
+    steerY[a] = newY;
+  }
 }
 
 Adjust(agent)
@@ -512,14 +665,12 @@ Adjust(agent)
 Steer(agent)
 {
   let out = new Float64Array(2);
-  this.SteerInto(agent, out, null);
+  this.SteerInto(agent, out);
   return [out[0], out[1]];
 }
 
-// Steer() writing into out[0], out[1] instead of returning an array. With
-// `snap` (the grid's start-of-tick copies of x, y, vx, vy) the neighbours'
-// state is read from its typed arrays rather than from the agent objects.
-SteerInto(agent, out, snap)
+// Steer() writing into out[0], out[1] instead of returning an array.
+SteerInto(agent, out)
 {
   out[0] = 0;
   out[1] = 0;
@@ -544,10 +695,9 @@ SteerInto(agent, out, snap)
 
       for(let i = 0; i < agent.close.length; i++)
       {
-        let j = agent.close[i];
-        let other = this.agents[j];
-        let xDif = agent.x - (snap ? snap.xs[j] : other.x);
-        let yDif = agent.y - (snap ? snap.ys[j] : other.y);
+        let other = this.agents[agent.close[i]];
+        let xDif = agent.x - other.x;
+        let yDif = agent.y - other.y;
         let dist = Math.sqrt(xDif * xDif + yDif * yDif);
 
         if(dist === 0)
@@ -585,27 +735,22 @@ SteerInto(agent, out, snap)
 
     for(let i = 0; i < agent.nearby.length; i++)
     {
-      let j = agent.nearby[i];
-      let other = this.agents[j];
-      let ox = snap ? snap.xs[j] : other.x;
-      let oy = snap ? snap.ys[j] : other.y;
-      let ovx = snap ? snap.vxs[j] : other.vx;
-      let ovy = snap ? snap.vys[j] : other.vy;
+      let other = this.agents[agent.nearby[i]];
       if(agent.colour === other.colour)
       {
         // Dividing by 1 changes nothing.
-        alignX += ovx;
-        alignY += ovy;
-        cohereX += ox;
-        cohereY += oy;
+        alignX += other.vx;
+        alignY += other.vy;
+        cohereX += other.x;
+        cohereY += other.y;
         weight += 1;
       }
       else
       {
-        alignX += ovx / divisor;
-        alignY += ovy / divisor;
-        cohereX += ox / divisor;
-        cohereY += oy / divisor;
+        alignX += other.vx / divisor;
+        alignY += other.vy / divisor;
+        cohereX += other.x / divisor;
+        cohereY += other.y / divisor;
         weight += 1 / divisor;
       }
     }
