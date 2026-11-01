@@ -74,3 +74,45 @@ test('Step gives the same flock with the grid as with all-pairs', () => {
   };
   assert.deepEqual(run(true), run(false));
 });
+
+// The whole of Step(): two identically seeded flocks, one searched with the
+// grid and one all-pairs, must hold the same neighbour lists and state after
+// every tick, including the awkward agents and a canvas shrunk mid-run.
+for(const wrap of [true, false])
+{
+  test(`Step with the grid equals Step with all-pairs on every tick, awkward agents included (${wrap ? 'wrap' : 'turn'})`, () => {
+    let gridTicks = 0;
+    const make = (useGrid) => {
+      const { flock } = scene({ width: 900, height: 600, random: seeded(21), flockSize: 150, raceCount: 3, bias: 4, wrap, boxX: 60, boxY: 60 });
+      const build = flock.BuildGrid;
+      flock.BuildGrid = useGrid ? (n) => { const ok = build.call(flock, n); if(ok) gridTicks++; return ok; } : () => false;
+      flock.Start();
+      const a = flock.agents;
+      a[3].y = NaN;
+      a[4].y = Infinity;
+      a[9].x = -Infinity;
+      a[5].x = -5000;
+      a[8].x = 1e9;
+      a[6].x = a[7].x;
+      a[6].y = a[7].y;
+      a[6].vx = a[7].vx;
+      a[6].vy = a[7].vy;
+      return flock;
+    };
+    const state = (flock) => flock.agents.map((a) =>
+      [a.x, a.y, a.vx, a.vy, a.outBox, [...a.nearby], [...a.close]]);
+    const withGrid = make(true);
+    const allPairs = make(false);
+    for(let tick = 0; tick < 40; tick++)
+    {
+      // Shrunk so many agents are off the canvas and keep their stale lists,
+      // then widened again.
+      if(tick === 10) for(const f of [withGrid, allPairs]) { f.width = 300; f.height = 200; }
+      if(tick === 25) for(const f of [withGrid, allPairs]) { f.width = 900; f.height = 600; }
+      withGrid.Step();
+      allPairs.Step();
+      assert.deepEqual(state(withGrid), state(allPairs), `tick ${tick}`);
+    }
+    assert.ok(gridTicks >= 30, 'the grid search ran on most ticks');
+  });
+}
