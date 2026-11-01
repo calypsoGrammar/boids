@@ -15,13 +15,12 @@ const DEFAULT_MIN_SPEED = 0.5;
 const DEFAULT_MAX_SPEED = 2.5;
 const DEFAULT_FLOCK_SIZE = 50;
 const AGENT_RADIUS = 5;
-// Species colours: darkest-allowed contrast with the page, and the least RGB
-// distance between two species.
-const MAX_COLOUR_LUMA = 200;
-const MIN_COLOUR_DISTANCE = 100;
-// Fallbacks for a drawn colour that is too close to an earlier species.
-const COLOUR_PALETTE = [[200, 30, 30], [30, 30, 200], [30, 140, 30], [160, 90, 0], [140, 30, 160], [0, 130, 140],
-  [20, 20, 20], [230, 100, 150], [100, 100, 100], [120, 170, 0], [0, 90, 200], [190, 150, 0]];
+// Species colours come from a curated palette: every colour has a WCAG
+// contrast of at least 3:1 against the rgb(250,250,250) page and every pair is
+// at least 100 apart in RGB, so species are visible and tell apart.
+const COLOUR_PALETTE = [[200, 30, 30], [0, 135, 255], [0, 150, 0], [225, 0, 255], [30, 0, 120], [135, 135, 150],
+  [75, 0, 255], [75, 15, 0], [135, 135, 0], [0, 120, 120], [150, 0, 150], [240, 75, 135]];
+const MIN_COLOUR_CONTRAST = 3;
 // The simulation advances in fixed ticks of this many ms (125 per second, the
 // rate of the old 8 ms interval), however often the screen refreshes.
 const TICK_MS = 8;
@@ -113,23 +112,28 @@ class Flock
     this.random = Math.random;
   }
 
-// Colours are drawn first, so the random sequence does not depend on this.
-// A colour too light for the page is darkened; one too close to an earlier
-// species is swapped for the palette colour farthest from all of them.
-VisibleColour(col, races)
+// Relative luminance of an sRGB colour (WCAG), 0 black to 1 white.
+static Luminance(col)
 {
-  let luma = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-  let gap = (c) => Math.min(Infinity, ...races.map((race) => Math.hypot(race[0] - c[0], race[1] - c[1], race[2] - c[2])));
-  if(luma(col) > MAX_COLOUR_LUMA)
-  {
-    let scale = MAX_COLOUR_LUMA / luma(col);
-    col = col.map((value) => Math.floor(value * scale));
-  }
-  if(gap(col) >= MIN_COLOUR_DISTANCE) return col;
-  let best = col;
-  for(let candidate of COLOUR_PALETTE)
-    if(gap(candidate) > gap(best)) best = candidate;
-  return best.slice();
+  let [r, g, bl] = col.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+}
+
+// Contrast ratio of a colour against the rgb(250,250,250) page.
+static Contrast(col)
+{
+  return (Flock.Luminance([250, 250, 250]) + 0.05) / (Flock.Luminance(col) + 0.05);
+}
+
+// The colour of a species. The drawn colour picks one of the palette colours
+// still free; only past the palette does the drawn colour itself get used,
+// darkened until it is visible on the page.
+SpeciesColour(col, races)
+{
+  let free = COLOUR_PALETTE.filter((c) => !races.some((race) => race.every((v, j) => v === c[j])));
+  if(free.length > 0) return free[Math.min(free.length - 1, Math.floor(col[0] / 255 * free.length))].slice();
+  while(Flock.Contrast(col) < MIN_COLOUR_CONTRAST) col = col.map((v) => Math.floor(v * 0.9));
+  return col;
 }
 
 Start()
@@ -144,18 +148,12 @@ Start()
 
   for(let i = 0; i < this.raceCount; i++)
   {
-    // Species are told apart by colour, so a colour already taken is drawn
-    // again.
-    let col;
-    do
-    {
-      let r = Math.floor(this.random() * 255);
-      let g = Math.floor(this.random() * 255);
-      let b = Math.floor(this.random() * 255);
-      col = [r, g, b];
-    }
-    while(races.some((race) => race.every((value, j) => value === col[j])));
-    col = this.VisibleColour(col, races);
+    // Three draws per species; SpeciesColour() turns them into a palette colour.
+    let r = Math.floor(this.random() * 255);
+    let g = Math.floor(this.random() * 255);
+    let b = Math.floor(this.random() * 255);
+    let col = [r, g, b];
+    col = this.SpeciesColour(col, races);
     races.push(col);
   }
 

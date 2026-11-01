@@ -60,7 +60,7 @@ test('Start() maps random draws to colours, positions and signed speeds', () => 
     random: scripted([0.1, 0.2, 0.3, 0.25, 0.75, 0.8, 0.1, 0.9, 0.2, 0]) });
   flock.Start();
   const [agent] = flock.agents;
-  assert.equal(agent.colour, 'rgba(25,51,76, 1)');
+  assert.equal(agent.colour, 'rgba(0,135,255, 1)');
   // Spawned inside the box edges 5..795 and 5..595: (5 + floor(0.25 * 790),
   // 5 + floor(0.75 * 590)) = (202, 447), with v = (-2, max(0.5, 0.25)).
   // Start() then runs one Update().
@@ -773,11 +773,11 @@ test('species count: no species, fractions and non-numbers still give a valid fl
 });
 
 test('species never share a colour', () => {
-  // The second species first draws the first one's colour, then a new one.
+  // Both species draw the same colour; the palette still gives them two.
   const { flock } = scene({ flockSize: 40, raceCount: 2, variance: 0,
-    random: scripted([0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.5, 0.6, 0.7, 0.4, 0.4, 0.3, 0.3, 0.6, 0.6, 0.99]) });
+    random: scripted([0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.4, 0.4, 0.3, 0.3, 0.6, 0.6, 0.99]) });
   flock.Start();
-  assert.deepEqual([...new Set(flock.agents.map((a) => a.colour))].sort(), ['rgba(127,153,178, 1)', 'rgba(25,51,76, 1)']);
+  assert.deepEqual([...new Set(flock.agents.map((a) => a.colour))].sort(), ['rgba(0,135,255, 1)', 'rgba(0,150,0, 1)']);
 });
 
 test('variance outside 0..100 is limited when the flock is generated', () => {
@@ -869,16 +869,19 @@ test('a fixed six-agent scene replays the recorded 200-frame trajectory', () => 
 });
 
 test('species colours are visible on the page and clearly different', () => {
-  for(const raceCount of [2, 5, 10, 20])
-  {
-    const { flock } = scene({ flockSize: raceCount, raceCount, variance: 0 });
-    let seed = 7;
-    flock.random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    flock.Start();
-    const cols = [...new Set(flock.agents.map((a) => a.colour))].map((c) => c.match(/\d+/g).slice(0, 3).map(Number));
-    for(const [r, g, b] of cols) assert.ok(0.299 * r + 0.587 * g + 0.114 * b <= 200, String(raceCount));
-    if(raceCount <= 5)
+  const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const contrast = (c) => (lum([250, 250, 250]) + 0.05) / (lum(c) + 0.05);
+  for(let raceCount = 1; raceCount <= 10; raceCount++)
+    for(let seed = 1; seed <= 20; seed++)
+    {
+      const { flock } = scene({ flockSize: 1000, raceCount, variance: 0, random: seeded(seed) });
+      flock.Start();
+      const cols = [...new Set(flock.agents.map((a) => a.colour))].map((c) => c.match(/\d+/g).slice(0, 3).map(Number));
+      const label = `${raceCount} species, seed ${seed}`;
+      assert.equal(cols.length, raceCount, label);
+      for(const c of cols) assert.ok(contrast(c) >= 3, `${label}: ${c}`);
       for(let i = 0; i < cols.length; i++) for(let j = i + 1; j < cols.length; j++)
-        assert.ok(Math.hypot(...cols[i].map((v, k) => v - cols[j][k])) > 60, String(raceCount));
-  }
+        assert.ok(Math.hypot(...cols[i].map((v, k) => v - cols[j][k])) >= 100, `${label}: ${cols[i]} ${cols[j]}`);
+    }
 });
