@@ -115,7 +115,8 @@ input:focus-visible {
   width: calc(100% - 12px);
   max-width: 640px;
   max-height: calc(100vh - 5.5rem);
-  max-height: calc(var(--vh, 1vh) * 100 - 5.5rem - env(safe-area-inset-top));
+  /* --status-room: space for the status at the bottom while it shows. */
+  max-height: calc(var(--vh, 1vh) * 100 - 5.5rem - var(--status-room, 0rem) - env(safe-area-inset-top));
   padding: 0.5rem 0.75rem 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -262,7 +263,7 @@ input:focus-visible {
     transform: none;
     width: min(380px, 55%);
     max-height: calc(100vh - 12px);
-    max-height: calc(var(--vh, 1vh) * 100 - 12px);
+    max-height: calc(var(--vh, 1vh) * 100 - 12px - var(--status-room, 0rem));
   }
 
   .settings-groups {

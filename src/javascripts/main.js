@@ -976,6 +976,8 @@ function ShowStatus()
   let text = [notices.error, notices.viewport, notices.input].filter((notice) => notice !== "").join(" ");
   statusMessage.textContent = text;
   statusMessage.style.display = text === "" ? "none" : "";
+  // Room the settings panel leaves for the status at the bottom (style.css).
+  document.documentElement.style.setProperty("--status-room", text === "" ? "0rem" : "5rem");
 }
 
 // Sizes the canvas to the window. Its logical size, in CSS pixels, is what the

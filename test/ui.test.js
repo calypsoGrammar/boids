@@ -272,7 +272,7 @@ test('the settings panel scrolls inside the window height', () => {
   const panel = rule('.settings-panel');
   assert.ok(panel.includes('overflow-y:auto'));
   assert.ok(panel.includes('overscroll-behavior:contain'));
-  assert.ok(panel.includes('max-height:calc(var(--vh,1vh) * 100 - 5.5rem - env(safe-area-inset-top))'));
+  assert.ok(panel.includes('max-height:calc(var(--vh,1vh) * 100 - 5.5rem - var(--status-room,0rem) - env(safe-area-inset-top))'));
   assert.ok(panel.includes('width:calc(100% - 12px)'), 'fits a narrow window');
   // Generate stays reachable while the groups scroll.
   assert.ok(rule('.generate-bar').includes('position:sticky'));
@@ -282,7 +282,7 @@ test('the settings panel scrolls inside the window height', () => {
 test('a short landscape screen puts the settings in a column beside the flock', () => {
   const landscape = media('(orientation:landscape) and (max-height:520px)');
   assert.ok(rule('.settings-panel', landscape).includes('width:min(380px,55%)'));
-  assert.ok(rule('.settings-panel', landscape).includes('max-height:calc(var(--vh,1vh) * 100 - 12px)'));
+  assert.ok(rule('.settings-panel', landscape).includes('max-height:calc(var(--vh,1vh) * 100 - 12px - var(--status-room,0rem))'));
   assert.ok(rule('.toolbar', landscape).includes('transform:none'));
   assert.ok(rule('.settings-groups', landscape).includes('grid-template-columns:minmax(0,1fr)'));
 });
@@ -317,4 +317,10 @@ test('the panel text stays opaque over the flock', () => {
   assert.doesNotMatch(read('index.html'), /opacity:\s*90%/);
   assert.ok(rule('.settings-panel').includes('background-color:#fafafaf0'));
   assert.ok(rule('.hint').includes('color:#4b4b4b'), 'rgb(75,75,75) on rgb(250,250,250), over 7:1');
+});
+
+test('the settings panel leaves room for the status so it never covers the Generate bar', () => {
+  assert.ok(rule('.settings-panel').includes('max-height:calc(var(--vh,1vh) * 100 - 5.5rem - var(--status-room,0rem) - env(safe-area-inset-top))'));
+  assert.ok(rule('.settings-panel', media('(orientation:landscape) and (max-height:520px)')).join().includes('var(--status-room,0rem)'));
+  assert.ok(!rule('.settings-panel', media('(orientation:portrait)')).join().includes('status-room'), 'the status is at the top in portrait');
 });
