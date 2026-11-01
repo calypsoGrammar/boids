@@ -302,8 +302,8 @@ GetNearbyAgents(agent, length)
 // Buckets the agents into square cells at least as wide as the largest vision,
 // so every neighbour of an agent lies in its cell or one of the 8 around it.
 // Returns false when no such grid exists (a vision that is not a finite
-// positive number, or an x of NaN); the caller then searches all-pairs. Agents without a
-// finite position are never neighbours, so they are left out.
+// positive number, or an x of NaN); the caller then searches all-pairs.
+// Agents without a finite position are never neighbours, so they are left out.
 BuildGrid(length)
 {
   let agents = this.agents;
@@ -336,20 +336,44 @@ BuildGrid(length)
   if(!(cols >= 1 && rows >= 1)) { cols = 1; rows = 1; } // no finite agent
 
   let count = cols * rows;
-  let start = new Int32Array(count + 1);
-  let cellOf = new Int32Array(length).fill(-1);
+  // The grid's buffers are kept between ticks and only regrown, like the
+  // steering buffers in Step(), so a tick allocates nothing once they fit.
+  let grid = this.grid;
+  if(grid === undefined || grid.cellOf.length < length || grid.start.length < count + 1)
+  {
+    grid = this.grid = {
+      cellOf: new Int32Array(length),
+      xs: new Float64Array(length),
+      ys: new Float64Array(length),
+      items: new Int32Array(length),
+      found: new Int32Array(9 * length),
+      start: new Int32Array(count + 1),
+      fill: new Int32Array(count + 1),
+      from: new Int32Array(count + 1),
+    };
+  }
+  let { cellOf, xs, ys, items, found, start, fill, from } = grid;
+  start.fill(0, 0, count + 1);
   for(let i = 0; i < length; i++)
   {
     let a = agents[i];
-    if(!Number.isFinite(a.x) || !Number.isFinite(a.y)) continue;
+    xs[i] = a.x;
+    ys[i] = a.y;
+    if(!Number.isFinite(a.x) || !Number.isFinite(a.y))
+    {
+      cellOf[i] = -1;
+      continue;
+    }
     let c = Math.floor((a.y - minY) / cell) * cols + Math.floor((a.x - minX) / cell);
     cellOf[i] = c;
     start[c + 1]++;
   }
-  for(let c = 0; c < count; c++) start[c + 1] += start[c];
+  for(let c = 0; c < count; c++)
+  {
+    start[c + 1] += start[c];
+    fill[c] = start[c];
+  }
   // Filled in index order, so each cell lists its agents in ascending order.
-  let fill = start.slice(0, count);
-  let items = new Int32Array(start[count]);
   for(let i = 0; i < length; i++)
   {
     if(cellOf[i] >= 0) items[fill[cellOf[i]]++] = i;
@@ -357,8 +381,7 @@ BuildGrid(length)
   // Every agent of a cell has the same candidates (the agents of the 3 x 3
   // cells around it), so each occupied cell sorts them once, ascending: the
   // lists then come out in all-pairs order, so the sums are the same too.
-  let from = new Int32Array(count + 1);
-  let found = new Int32Array(9 * items.length);
+  // The three row runs are already ascending, so an insertion sort is cheap.
   let n = 0;
   for(let c = 0; c < count; c++)
   {
@@ -371,12 +394,20 @@ BuildGrid(length)
       // The three cells of a row are adjacent, so they are one run of items.
       let first = start[r * cols + Math.max(cx - 1, 0)];
       let last = start[r * cols + Math.min(cx + 1, cols - 1) + 1];
-      for(let k = first; k < last; k++) found[n++] = items[k];
+      for(let k = first; k < last; k++)
+      {
+        let v = items[k];
+        let j = n++;
+        while(j > from[c] && found[j - 1] > v) { found[j] = found[j - 1]; j--; }
+        found[j] = v;
+      }
     }
-    found.subarray(from[c], n).sort();
   }
   from[count] = n;
-  this.grid = { minX, minY, cell, cols, from, found };
+  grid.minX = minX;
+  grid.minY = minY;
+  grid.cell = cell;
+  grid.cols = cols;
   return true;
 }
 
@@ -389,7 +420,7 @@ GetNearbyAgentsGrid(agent)
   let closeContext = agent.close;
   context.length = 0;
   closeContext.length = 0;
-  let { minX, minY, cell, cols, from, found } = this.grid;
+  let { minX, minY, cell, cols, from, found, xs, ys } = this.grid;
   let range = agent.vision;
   let tooClose = agent.closeVision;
   let x = agent.x;
@@ -401,10 +432,9 @@ GetNearbyAgentsGrid(agent)
   {
     let i = found[k];
     if(i == agent.index) continue;
-    let other = this.agents[i];
-    let xDif = Math.abs(x - other.x);
+    let xDif = Math.abs(x - xs[i]);
     if(xDif >= range) continue;
-    let yDif = Math.abs(y - other.y);
+    let yDif = Math.abs(y - ys[i]);
     if(yDif < range)
     {
       context.push(i);
@@ -474,12 +504,16 @@ Steer(agent)
     }
   }
 
-  // ALIGNMENT
-  if(ali)
+  // ALIGNMENT and COHESION, summed in one pass over the neighbours (each sum
+  // still adds in neighbour order).
+  if(ali || coh)
   {
     let alignX = 0;
     let alignY = 0;
-    let weight = 0;
+    let alignWeight = 0;
+    let cohereX = 0;
+    let cohereY = 0;
+    let cohereWeight = 0;
 
     for(let i = 0; i < agent.nearby.length; i++)
     {
@@ -487,33 +521,24 @@ Steer(agent)
       let d = agent.colour === other.colour ? 1 : divisor;
       alignX += other.vx / d;
       alignY += other.vy / d;
-      weight += 1 / d;
-    }
-
-    let alignment = this.Coefficient(agent, "alignment");
-    newX += ( alignX / weight - agent.vx ) * alignment;
-    newY += ( alignY / weight - agent.vy ) * alignment;
-  }
-
-  // COHESION
-  if(coh)
-  {
-    let cohereX = 0;
-    let cohereY = 0;
-    let weight = 0;
-
-    for(let i = 0; i < agent.nearby.length; i++)
-    {
-      let other = this.agents[agent.nearby[i]];
-      let d = agent.colour === other.colour ? 1 : divisor;
+      alignWeight += 1 / d;
       cohereX += other.x / d;
       cohereY += other.y / d;
-      weight += 1 / d;
+      cohereWeight += 1 / d;
     }
 
-    let cohesion = this.Coefficient(agent, "cohesion");
-    newX += ( cohereX / weight - agent.x ) * cohesion;
-    newY += ( cohereY / weight - agent.y ) * cohesion;
+    if(ali)
+    {
+      let alignment = this.Coefficient(agent, "alignment");
+      newX += ( alignX / alignWeight - agent.vx ) * alignment;
+      newY += ( alignY / alignWeight - agent.vy ) * alignment;
+    }
+    if(coh)
+    {
+      let cohesion = this.Coefficient(agent, "cohesion");
+      newX += ( cohereX / cohereWeight - agent.x ) * cohesion;
+      newY += ( cohereY / cohereWeight - agent.y ) * cohesion;
+    }
   }
   return [newX, newY];
 }
