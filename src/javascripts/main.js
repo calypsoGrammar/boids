@@ -34,15 +34,27 @@ const MIN_VIEW_SIZE = 2 * AGENT_RADIUS;
 // Separation treats neighbours closer than this (px) as this far away, so the
 // push stays finite when two agents overlap.
 const MIN_SEPARATION_DISTANCE = 1;
+// Flocks smaller than this search for neighbours all-pairs; building the grid
+// costs more than it saves there.
+const GRID_MIN_AGENTS = 64;
 // Spreads the fallback directions for stopped and overlapping agents.
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 // The coefficients each agent varies, with the slider that sets the flock
 // value and the slider limits (index.html) used when a slider has none.
 const COEFFICIENTS = {
-  seperation: { slider: "flockRangeSeperation", limits: [0, 0.25] },
-  alignment: { slider: "flockRangeAlignment", limits: [0, 0.25] },
-  cohesion: { slider: "flockRangeCohesion", limits: [0, 0.0025] },
+  seperation: { offset: "seperationOffset", slider: "flockRangeSeperation", limits: [0, 0.25] },
+  alignment: { offset: "alignmentOffset", slider: "flockRangeAlignment", limits: [0, 0.25] },
+  cohesion: { offset: "cohesionOffset", slider: "flockRangeCohesion", limits: [0, 0.0025] },
 };
+
+// Agents of a species share one colour string object, so Steer() tells
+// species apart by identity instead of comparing the text.
+const COLOURS = new Map();
+function InternColour(colour)
+{
+  if(!COLOURS.has(colour)) COLOURS.set(colour, colour);
+  return COLOURS.get(colour);
+}
 
 class Flock
 {
@@ -224,10 +236,10 @@ SliderLimits(coefficient)
 // agent's offset, kept inside the slider limits.
 Coefficient(agent, key)
 {
-  let [min, max] = this.limits[key];
-  let value = this[key] + agent[key + "Offset"];
-  if(!Number.isFinite(value)) return min;
-  return Math.min(Math.max(value, min), max);
+  let limits = this.limits[key];
+  let value = this[key] + agent[COEFFICIENTS[key].offset];
+  if(!Number.isFinite(value)) return limits[0];
+  return Math.min(Math.max(value, limits[0]), limits[1]);
 }
 
 // Neighbours of another species count 1 / divisor as much as those of the
@@ -275,19 +287,30 @@ Step()
   }
   let steerX = this.steerX;
   let steerY = this.steerY;
+  let grid = len >= GRID_MIN_AGENTS && this.BuildGrid(len);
+  if(this.steerOut === undefined) this.steerOut = new Float64Array(2);
+  let out = this.steerOut;
   for(let i = 0; i < len; i++)
   {
     this.agents[i].outBox = false;
-    this.GetNearbyAgents(this.agents[i], len);
-    let steer = this.Steer(this.agents[i]);
-    steerX[i] = steer[0];
-    steerY[i] = steer[1];
+    if(grid) this.GetNearbyAgentsGrid(this.agents[i]);
+    else this.GetNearbyAgents(this.agents[i], len);
+    this.SteerInto(this.agents[i], out);
+    steerX[i] = out[0];
+    steerY[i] = out[1];
   }
+  let edges = null; // the box edges, worked out once per agent radius
   for(let i = 0; i < len; i++)
   {
     this.agents[i].vx += steerX[i];
     this.agents[i].vy += steerY[i];
-    this.DetectEdgeCollisions(this.agents[i]);
+    if(edges === null || edges.radius !== this.agents[i].radius)
+    {
+      edges = { radius: this.agents[i].radius,
+        x: this.Edges(this.box_x, this.width, this.agents[i].radius),
+        y: this.Edges(this.box_y, this.height, this.agents[i].radius) };
+    }
+    this.DetectEdgeCollisions(this.agents[i], edges);
     this.MovePosition(this.agents[i]);
   }
 }
@@ -318,6 +341,167 @@ GetNearbyAgents(agent, length)
   }
 }
 
+// Buckets the agents into square cells at least as wide as the largest vision,
+// so every neighbour of an agent lies in its cell or one of the 8 around it.
+// Returns false when no such grid exists (a vision that is not a finite
+// positive number, or an x of NaN); the caller then searches all-pairs.
+// Agents without a finite position are never neighbours, so they are left out.
+BuildGrid(length)
+{
+  let agents = this.agents;
+  let cell = 0;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for(let i = 0; i < length; i++)
+  {
+    let a = agents[i];
+    if(!(a.vision > 0) || !Number.isFinite(a.vision)) return false;
+    if(a.vision > cell) cell = a.vision;
+    // All-pairs lets an agent with x = NaN pass the x test, so such a flock
+    // is searched all-pairs to keep the same neighbours.
+    if(Number.isNaN(a.x)) return false;
+    if(!Number.isFinite(a.x) || !Number.isFinite(a.y)) continue;
+    if(a.x < minX) minX = a.x;
+    if(a.x > maxX) maxX = a.x;
+    if(a.y < minY) minY = a.y;
+    if(a.y > maxY) maxY = a.y;
+  }
+  // Wider cells are still correct, so a flock spread over a huge area gets a
+  // coarser grid instead of a huge one.
+  let cols, rows;
+  for(;;)
+  {
+    cols = Math.floor((maxX - minX) / cell) + 1;
+    rows = Math.floor((maxY - minY) / cell) + 1;
+    if(!(cols * rows > 4 * length + 16)) break;
+    cell *= 2;
+  }
+  if(!(cols >= 1 && rows >= 1)) { cols = 1; rows = 1; } // no finite agent
+
+  let count = cols * rows;
+  // The grid's buffers are kept between ticks and only regrown, like the
+  // steering buffers in Step(), so a tick allocates nothing once they fit.
+  let grid = this.grid;
+  if(grid === undefined || grid.cellOf.length < length || grid.start.length < count + 1)
+  {
+    grid = this.grid = {
+      cellOf: new Int32Array(length),
+      xs: new Float64Array(length),
+      ys: new Float64Array(length),
+      items: new Int32Array(length),
+      found: new Int32Array(9 * length),
+      fx: new Float64Array(9 * length),
+      fy: new Float64Array(9 * length),
+      start: new Int32Array(count + 1),
+      fill: new Int32Array(count + 1),
+      from: new Int32Array(count + 1),
+    };
+  }
+  let { cellOf, xs, ys, items, found, fx, fy, start, fill, from } = grid;
+  start.fill(0, 0, count + 1);
+  for(let i = 0; i < length; i++)
+  {
+    let a = agents[i];
+    xs[i] = a.x;
+    ys[i] = a.y;
+    if(!Number.isFinite(a.x) || !Number.isFinite(a.y))
+    {
+      cellOf[i] = -1;
+      continue;
+    }
+    let c = Math.floor((a.y - minY) / cell) * cols + Math.floor((a.x - minX) / cell);
+    cellOf[i] = c;
+    start[c + 1]++;
+  }
+  for(let c = 0; c < count; c++)
+  {
+    start[c + 1] += start[c];
+    fill[c] = start[c];
+  }
+  // Filled in index order, so each cell lists its agents in ascending order.
+  for(let i = 0; i < length; i++)
+  {
+    if(cellOf[i] >= 0) items[fill[cellOf[i]]++] = i;
+  }
+  // Every agent of a cell has the same candidates (the agents of the 3 x 3
+  // cells around it), so each occupied cell sorts them once, ascending: the
+  // lists then come out in all-pairs order, so the sums are the same too.
+  // The three row runs are already ascending, so an insertion sort is cheap.
+  let n = 0;
+  for(let c = 0; c < count; c++)
+  {
+    from[c] = n;
+    if(start[c + 1] === start[c]) continue;
+    let cx = c % cols;
+    let cy = (c - cx) / cols;
+    for(let r = Math.max(cy - 1, 0); r <= Math.min(cy + 1, rows - 1); r++)
+    {
+      // The three cells of a row are adjacent, so they are one run of items.
+      let first = start[r * cols + Math.max(cx - 1, 0)];
+      let last = start[r * cols + Math.min(cx + 1, cols - 1) + 1];
+      for(let k = first; k < last; k++)
+      {
+        let v = items[k];
+        let j = n++;
+        while(j > from[c] && found[j - 1] > v) { found[j] = found[j - 1]; j--; }
+        found[j] = v;
+      }
+    }
+    // The candidates' positions, aligned with found, so the filter reads
+    // them in sequence.
+    for(let k = from[c]; k < n; k++)
+    {
+      fx[k] = xs[found[k]];
+      fy[k] = ys[found[k]];
+    }
+  }
+  from[count] = n;
+  grid.minX = minX;
+  grid.minY = minY;
+  grid.cell = cell;
+  grid.cols = cols;
+  return true;
+}
+
+// The same lists as GetNearbyAgents (same agents, same ascending order, so the
+// same sums), from the grid of the current tick.
+GetNearbyAgentsGrid(agent)
+{
+  let context = agent.nearby;
+  let closeContext = agent.close;
+  let { minX, minY, cell, cols, from, found, fx, fy } = this.grid;
+  let range = agent.vision;
+  let tooClose = agent.closeVision;
+  let x = agent.x;
+  let y = agent.y;
+  if(!Number.isFinite(x) || !Number.isFinite(y))
+  {
+    context.length = 0;
+    closeContext.length = 0;
+    return;
+  }
+  let c = Math.floor((y - minY) / cell) * cols + Math.floor((x - minX) / cell);
+  let end = from[c + 1];
+  // Lists are overwritten by index and cut to size at the end, so their
+  // storage is not dropped and regrown every tick.
+  let nc = 0;
+  let ncl = 0;
+  for(let k = from[c]; k < end; k++)
+  {
+    let i = found[k];
+    if(i == agent.index) continue;
+    let xDif = Math.abs(x - fx[k]);
+    if(xDif >= range) continue;
+    let yDif = Math.abs(y - fy[k]);
+    if(yDif < range)
+    {
+      context[nc++] = i;
+      if(xDif < tooClose && yDif < tooClose) closeContext[ncl++] = i;
+    }
+  }
+  if(context.length !== nc) context.length = nc;
+  if(closeContext.length !== ncl) closeContext.length = ncl;
+}
+
 Adjust(agent)
 {
   let steer = this.Steer(agent);
@@ -330,7 +514,17 @@ Adjust(agent)
 // changes nothing.
 Steer(agent)
 {
-  if(agent.nearby.length === 0) return [0, 0];
+  let out = new Float64Array(2);
+  this.SteerInto(agent, out);
+  return [out[0], out[1]];
+}
+
+// Steer() writing into out[0], out[1] instead of returning an array.
+SteerInto(agent, out)
+{
+  out[0] = 0;
+  out[1] = 0;
+  if(agent.nearby.length === 0) return;
 
   let newX = 0
   let newY = 0;
@@ -379,48 +573,53 @@ Steer(agent)
     }
   }
 
-  // ALIGNMENT
-  if(ali)
+  // ALIGNMENT and COHESION, summed in one pass over the neighbours (each sum
+  // still adds in neighbour order).
+  if(ali || coh)
   {
     let alignX = 0;
     let alignY = 0;
     let weight = 0;
-
-    for(let i = 0; i < agent.nearby.length; i++)
-    {
-      let other = this.agents[agent.nearby[i]];
-      let d = agent.colour === other.colour ? 1 : divisor;
-      alignX += other.vx / d;
-      alignY += other.vy / d;
-      weight += 1 / d;
-    }
-
-    let alignment = this.Coefficient(agent, "alignment");
-    newX += ( alignX / weight - agent.vx ) * alignment;
-    newY += ( alignY / weight - agent.vy ) * alignment;
-  }
-
-  // COHESION
-  if(coh)
-  {
     let cohereX = 0;
     let cohereY = 0;
-    let weight = 0;
 
     for(let i = 0; i < agent.nearby.length; i++)
     {
       let other = this.agents[agent.nearby[i]];
-      let d = agent.colour === other.colour ? 1 : divisor;
-      cohereX += other.x / d;
-      cohereY += other.y / d;
-      weight += 1 / d;
+      if(agent.colour === other.colour)
+      {
+        // Dividing by 1 changes nothing.
+        alignX += other.vx;
+        alignY += other.vy;
+        cohereX += other.x;
+        cohereY += other.y;
+        weight += 1;
+      }
+      else
+      {
+        alignX += other.vx / divisor;
+        alignY += other.vy / divisor;
+        cohereX += other.x / divisor;
+        cohereY += other.y / divisor;
+        weight += 1 / divisor;
+      }
     }
 
-    let cohesion = this.Coefficient(agent, "cohesion");
-    newX += ( cohereX / weight - agent.x ) * cohesion;
-    newY += ( cohereY / weight - agent.y ) * cohesion;
+    if(ali)
+    {
+      let alignment = this.Coefficient(agent, "alignment");
+      newX += ( alignX / weight - agent.vx ) * alignment;
+      newY += ( alignY / weight - agent.vy ) * alignment;
+    }
+    if(coh)
+    {
+      let cohesion = this.Coefficient(agent, "cohesion");
+      newX += ( cohereX / weight - agent.x ) * cohesion;
+      newY += ( cohereY / weight - agent.y ) * cohesion;
+    }
   }
-  return [newX, newY];
+  out[0] = newX;
+  out[1] = newY;
 }
 
 // The box inset used on a canvas axis of `size` px: the setting, capped so
@@ -440,10 +639,14 @@ Edges(inset, size, radius)
   return [low, high];
 }
 
-DetectEdgeCollisions(agent)
+DetectEdgeCollisions(agent, edges)
 {
-  let [left, right] = this.Edges(this.box_x, this.width, agent.radius);
-  let [top, bottom] = this.Edges(this.box_y, this.height, agent.radius);
+  if(edges === undefined)
+  {
+    edges = { x: this.Edges(this.box_x, this.width, agent.radius), y: this.Edges(this.box_y, this.height, agent.radius) };
+  }
+  let [left, right] = edges.x;
+  let [top, bottom] = edges.y;
   if(agent.x < left)
   {
     if(this.wrap) agent.x = right;
@@ -617,7 +820,7 @@ class FlockAgent
     this.vx = vx;
     this.vy = vy;
 
-    this.colour = "rgba(" + race[0] + "," + race[1] + "," + race[2] + ", 1)";
+    this.colour = InternColour("rgba(" + race[0] + "," + race[1] + "," + race[2] + ", 1)");
 
     this.nearby = [];
     this.close = [];
