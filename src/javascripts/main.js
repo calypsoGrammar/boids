@@ -36,10 +36,19 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 // The coefficients each agent varies, with the slider that sets the flock
 // value and the slider limits (index.html) used when a slider has none.
 const COEFFICIENTS = {
-  seperation: { slider: "flockRangeSeperation", limits: [0, 0.25] },
-  alignment: { slider: "flockRangeAlignment", limits: [0, 0.25] },
-  cohesion: { slider: "flockRangeCohesion", limits: [0, 0.0025] },
+  seperation: { offset: "seperationOffset", slider: "flockRangeSeperation", limits: [0, 0.25] },
+  alignment: { offset: "alignmentOffset", slider: "flockRangeAlignment", limits: [0, 0.25] },
+  cohesion: { offset: "cohesionOffset", slider: "flockRangeCohesion", limits: [0, 0.0025] },
 };
+
+// Agents of a species share one colour string object, so Steer() tells
+// species apart by identity instead of comparing the text.
+const COLOURS = new Map();
+function InternColour(colour)
+{
+  if(!COLOURS.has(colour)) COLOURS.set(colour, colour);
+  return COLOURS.get(colour);
+}
 
 class Flock
 {
@@ -202,10 +211,10 @@ SliderLimits(coefficient)
 // agent's offset, kept inside the slider limits.
 Coefficient(agent, key)
 {
-  let [min, max] = this.limits[key];
-  let value = this[key] + agent[key + "Offset"];
-  if(!Number.isFinite(value)) return min;
-  return Math.min(Math.max(value, min), max);
+  let limits = this.limits[key];
+  let value = this[key] + agent[COEFFICIENTS[key].offset];
+  if(!Number.isFinite(value)) return limits[0];
+  return Math.min(Math.max(value, limits[0]), limits[1]);
 }
 
 // Neighbours of another species count 1 / divisor as much as those of the
@@ -263,11 +272,18 @@ Step()
     steerX[i] = steer[0];
     steerY[i] = steer[1];
   }
+  let edges = null; // the box edges, worked out once per agent radius
   for(let i = 0; i < len; i++)
   {
     this.agents[i].vx += steerX[i];
     this.agents[i].vy += steerY[i];
-    this.DetectEdgeCollisions(this.agents[i]);
+    if(edges === null || edges.radius !== this.agents[i].radius)
+    {
+      edges = { radius: this.agents[i].radius,
+        x: this.Edges(this.box_x, this.width, this.agents[i].radius),
+        y: this.Edges(this.box_y, this.height, this.agents[i].radius) };
+    }
+    this.DetectEdgeCollisions(this.agents[i], edges);
     this.MovePosition(this.agents[i]);
   }
 }
@@ -510,34 +526,43 @@ Steer(agent)
   {
     let alignX = 0;
     let alignY = 0;
-    let alignWeight = 0;
+    let weight = 0;
     let cohereX = 0;
     let cohereY = 0;
-    let cohereWeight = 0;
 
     for(let i = 0; i < agent.nearby.length; i++)
     {
       let other = this.agents[agent.nearby[i]];
-      let d = agent.colour === other.colour ? 1 : divisor;
-      alignX += other.vx / d;
-      alignY += other.vy / d;
-      alignWeight += 1 / d;
-      cohereX += other.x / d;
-      cohereY += other.y / d;
-      cohereWeight += 1 / d;
+      if(agent.colour === other.colour)
+      {
+        // Dividing by 1 changes nothing.
+        alignX += other.vx;
+        alignY += other.vy;
+        cohereX += other.x;
+        cohereY += other.y;
+        weight += 1;
+      }
+      else
+      {
+        alignX += other.vx / divisor;
+        alignY += other.vy / divisor;
+        cohereX += other.x / divisor;
+        cohereY += other.y / divisor;
+        weight += 1 / divisor;
+      }
     }
 
     if(ali)
     {
       let alignment = this.Coefficient(agent, "alignment");
-      newX += ( alignX / alignWeight - agent.vx ) * alignment;
-      newY += ( alignY / alignWeight - agent.vy ) * alignment;
+      newX += ( alignX / weight - agent.vx ) * alignment;
+      newY += ( alignY / weight - agent.vy ) * alignment;
     }
     if(coh)
     {
       let cohesion = this.Coefficient(agent, "cohesion");
-      newX += ( cohereX / cohereWeight - agent.x ) * cohesion;
-      newY += ( cohereY / cohereWeight - agent.y ) * cohesion;
+      newX += ( cohereX / weight - agent.x ) * cohesion;
+      newY += ( cohereY / weight - agent.y ) * cohesion;
     }
   }
   return [newX, newY];
@@ -560,10 +585,14 @@ Edges(inset, size, radius)
   return [low, high];
 }
 
-DetectEdgeCollisions(agent)
+DetectEdgeCollisions(agent, edges)
 {
-  let [left, right] = this.Edges(this.box_x, this.width, agent.radius);
-  let [top, bottom] = this.Edges(this.box_y, this.height, agent.radius);
+  if(edges === undefined)
+  {
+    edges = { x: this.Edges(this.box_x, this.width, agent.radius), y: this.Edges(this.box_y, this.height, agent.radius) };
+  }
+  let [left, right] = edges.x;
+  let [top, bottom] = edges.y;
   if(agent.x < left)
   {
     if(this.wrap) agent.x = right;
@@ -737,7 +766,7 @@ class FlockAgent
     this.vx = vx;
     this.vy = vy;
 
-    this.colour = "rgba(" + race[0] + "," + race[1] + "," + race[2] + ", 1)";
+    this.colour = InternColour("rgba(" + race[0] + "," + race[1] + "," + race[2] + ", 1)");
 
     this.nearby = [];
     this.close = [];
