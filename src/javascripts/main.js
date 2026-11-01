@@ -28,6 +28,9 @@ const MIN_VIEW_SIZE = 2 * AGENT_RADIUS;
 // Separation treats neighbours closer than this (px) as this far away, so the
 // push stays finite when two agents overlap.
 const MIN_SEPARATION_DISTANCE = 1;
+// Flocks smaller than this search for neighbours all-pairs; building the grid
+// costs more than it saves there.
+const GRID_MIN_AGENTS = 64;
 // Spreads the fallback directions for stopped and overlapping agents.
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 // The coefficients each agent varies, with the slider that sets the flock
@@ -250,10 +253,12 @@ Step()
   }
   let steerX = this.steerX;
   let steerY = this.steerY;
+  let grid = len >= GRID_MIN_AGENTS && this.BuildGrid(len);
   for(let i = 0; i < len; i++)
   {
     this.agents[i].outBox = false;
-    this.GetNearbyAgents(this.agents[i], len);
+    if(grid) this.GetNearbyAgentsGrid(this.agents[i]);
+    else this.GetNearbyAgents(this.agents[i], len);
     let steer = this.Steer(this.agents[i]);
     steerX[i] = steer[0];
     steerY[i] = steer[1];
@@ -281,6 +286,120 @@ GetNearbyAgents(agent, length)
   let y = agent.y;
   for(let i = 0; i < length; i++)
   {
+    if(i == agent.index) continue;
+    let other = this.agents[i];
+    let xDif = Math.abs(x - other.x);
+    if(xDif >= range) continue;
+    let yDif = Math.abs(y - other.y);
+    if(yDif < range)
+    {
+      context.push(i);
+      if(xDif < tooClose && yDif < tooClose) closeContext.push(i);
+    }
+  }
+}
+
+// Buckets the agents into square cells at least as wide as the largest vision,
+// so every neighbour of an agent lies in its cell or one of the 8 around it.
+// Returns false when no such grid exists (a vision that is not a finite
+// positive number, or an x of NaN); the caller then searches all-pairs. Agents without a
+// finite position are never neighbours, so they are left out.
+BuildGrid(length)
+{
+  let agents = this.agents;
+  let cell = 0;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for(let i = 0; i < length; i++)
+  {
+    let a = agents[i];
+    if(!(a.vision > 0) || !Number.isFinite(a.vision)) return false;
+    if(a.vision > cell) cell = a.vision;
+    // All-pairs lets an agent with x = NaN pass the x test, so such a flock
+    // is searched all-pairs to keep the same neighbours.
+    if(Number.isNaN(a.x)) return false;
+    if(!Number.isFinite(a.x) || !Number.isFinite(a.y)) continue;
+    if(a.x < minX) minX = a.x;
+    if(a.x > maxX) maxX = a.x;
+    if(a.y < minY) minY = a.y;
+    if(a.y > maxY) maxY = a.y;
+  }
+  // Wider cells are still correct, so a flock spread over a huge area gets a
+  // coarser grid instead of a huge one.
+  let cols, rows;
+  for(;;)
+  {
+    cols = Math.floor((maxX - minX) / cell) + 1;
+    rows = Math.floor((maxY - minY) / cell) + 1;
+    if(!(cols * rows > 4 * length + 16)) break;
+    cell *= 2;
+  }
+  if(!(cols >= 1 && rows >= 1)) { cols = 1; rows = 1; } // no finite agent
+
+  let count = cols * rows;
+  let start = new Int32Array(count + 1);
+  let cellOf = new Int32Array(length).fill(-1);
+  for(let i = 0; i < length; i++)
+  {
+    let a = agents[i];
+    if(!Number.isFinite(a.x) || !Number.isFinite(a.y)) continue;
+    let c = Math.floor((a.y - minY) / cell) * cols + Math.floor((a.x - minX) / cell);
+    cellOf[i] = c;
+    start[c + 1]++;
+  }
+  for(let c = 0; c < count; c++) start[c + 1] += start[c];
+  // Filled in index order, so each cell lists its agents in ascending order.
+  let fill = start.slice(0, count);
+  let items = new Int32Array(start[count]);
+  for(let i = 0; i < length; i++)
+  {
+    if(cellOf[i] >= 0) items[fill[cellOf[i]]++] = i;
+  }
+  // Every agent of a cell has the same candidates (the agents of the 3 x 3
+  // cells around it), so each occupied cell sorts them once, ascending: the
+  // lists then come out in all-pairs order, so the sums are the same too.
+  let from = new Int32Array(count + 1);
+  let found = new Int32Array(9 * items.length);
+  let n = 0;
+  for(let c = 0; c < count; c++)
+  {
+    from[c] = n;
+    if(start[c + 1] === start[c]) continue;
+    let cx = c % cols;
+    let cy = (c - cx) / cols;
+    for(let r = Math.max(cy - 1, 0); r <= Math.min(cy + 1, rows - 1); r++)
+    {
+      // The three cells of a row are adjacent, so they are one run of items.
+      let first = start[r * cols + Math.max(cx - 1, 0)];
+      let last = start[r * cols + Math.min(cx + 1, cols - 1) + 1];
+      for(let k = first; k < last; k++) found[n++] = items[k];
+    }
+    found.subarray(from[c], n).sort();
+  }
+  from[count] = n;
+  this.grid = { minX, minY, cell, cols, from, found };
+  return true;
+}
+
+// The same lists as GetNearbyAgents (same agents, same ascending order, so the
+// same sums), from the grid of the current tick.
+GetNearbyAgentsGrid(agent)
+{
+  if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
+  let context = agent.nearby;
+  let closeContext = agent.close;
+  context.length = 0;
+  closeContext.length = 0;
+  let { minX, minY, cell, cols, from, found } = this.grid;
+  let range = agent.vision;
+  let tooClose = agent.closeVision;
+  let x = agent.x;
+  let y = agent.y;
+  if(!Number.isFinite(x) || !Number.isFinite(y)) return;
+  let c = Math.floor((y - minY) / cell) * cols + Math.floor((x - minX) / cell);
+  let n = from[c + 1];
+  for(let k = from[c]; k < n; k++)
+  {
+    let i = found[k];
     if(i == agent.index) continue;
     let other = this.agents[i];
     let xDif = Math.abs(x - other.x);
