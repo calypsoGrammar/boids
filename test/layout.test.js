@@ -193,3 +193,35 @@ test('reduced motion turns the tooltip fade off', { skip }, async (t) => {
   const transition = await page.$eval('#nextButton .tooltip', (el) => getComputedStyle(el).transitionDuration);
   assert.equal(transition, '0s');
 });
+
+// A frame error (CAL-1493) shows the status; a long one wraps to many lines.
+// The settings panel must stop above it, whatever its height.
+for(const [width, height] of [[480, 320], [667, 375], [844, 390], [1024, 768], [1280, 720], [375, 667]])
+{
+  for(const words of [1, 40])
+  {
+    test(`${width} × ${height}: a ${words}-word error status stays clear of the Generate bar`, { skip }, async (t) => {
+      const page = await open(t, width, height);
+      await page.click('#optionsButton');
+      const full = await page.$eval('#settingsMenu', (el) => el.getBoundingClientRect().height);
+      await page.evaluate((message) => {
+        // Only the frames fail, inside the loop; the click's own draw works.
+        const clear = window.CanvasRenderingContext2D.prototype.clearRect;
+        window.CanvasRenderingContext2D.prototype.clearRect = function(...args) {
+          if(!new Error().stack.includes('onclick')) throw new Error(message);
+          return clear.apply(this, args);
+        };
+      }, 'failure '.repeat(words).trim());
+      await page.click('#IS_PAUSED');
+      await page.waitForSelector('#statusMessage', { state: 'visible' });
+      const status = await box(page, '#statusMessage');
+      const bar = await box(page, '#generate');
+      assert.ok(!overlap(status, bar), 'the status does not cover the Generate bar');
+      assert.ok(inside(status, { x: 0, y: 0, width, height }), 'the status is in the window');
+      await page.click('#generateButton');
+      await page.evaluate(() => { delete window.CanvasRenderingContext2D.prototype.clearRect; });
+      assert.ok(!(await page.isVisible('#statusMessage')), 'Generate clears the status');
+      if(width > height) assert.equal(await page.$eval('#settingsMenu', (el) => el.getBoundingClientRect().height), full, 'the panel regains its height');
+    });
+  }
+}
