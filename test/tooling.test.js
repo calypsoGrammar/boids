@@ -1,12 +1,11 @@
 // Checks for the build tooling chosen in BOIDS-V1-02 (docs/audit/BOIDS-V1-02.md):
 // Alpine stays removed, Tailwind scans every file that uses classes, the
-// palette survives in the built CSS, and the build keeps the browser support
-// the site had under Vite 4. Reads the committed dist/, which
+// palette survives in the built CSS, and the build uses the browser floor
+// Tailwind 4 needs (CAL-1644). Reads the committed dist/, which
 // test/build.test.js keeps identical to a fresh build.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 
 const root = new URL('..', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
@@ -30,20 +29,25 @@ test('every package is build-time only', () => {
 });
 
 test('Tailwind scans every file that sets classes', () => {
-  const require = createRequire(import.meta.url);
-  const config = require('../tailwind.config.cjs');
-  assert.deepEqual(config.content, ['./index.html']);
+  // Tailwind 4 turns automatic detection off (source(none)) and names the one file.
+  const style = read('src/stylesheets/style.css');
+  assert.match(style, /@import "tailwindcss" source\(none\);/);
+  assert.deepEqual([...style.matchAll(/@source "([^"]+)"/g)].map((m) => m[1]), ['../../index.html']);
   // main.js only toggles inline styles; classes come from index.html alone.
   assert.doesNotMatch(main, /className|classList|setAttribute\(\s*['"]class|innerHTML|insertAdjacentHTML/);
 });
 
 test('the built CSS keeps the design palette and font', () => {
   const css = asset('css');
-  assert.match(css, /\.bg-mod_light\{[^}]*background-color:rgb\(250 250 250/);
-  assert.match(css, /\.bg-mod_dark\{[^}]*background-color:rgb\(50 50 50/);
-  assert.match(css, /\.text-mod_light\{[^}]*color:rgb\(250 250 250/);
-  assert.match(css, /\.hover\\:bg-mod_dark_light:hover\{[^}]*background-color:rgb\(75 75 75/);
-  assert.match(css, /\.font-f1\{font-family:Electrolize,sans-serif\}/);
+  assert.match(css, /--color-mod_light:#fafafa/);
+  assert.match(css, /--color-mod_dark:#323232/);
+  assert.match(css, /--color-mod_dark_light:#4b4b4b/);
+  assert.match(css, /\.bg-mod_light\{background-color:var\(--color-mod_light\)\}/);
+  assert.match(css, /\.bg-mod_dark\{background-color:var\(--color-mod_dark\)\}/);
+  assert.match(css, /\.text-mod_light\{color:var\(--color-mod_light\)\}/);
+  assert.match(css, /\.hover\\:bg-mod_dark_light:hover\{background-color:var\(--color-mod_dark_light\)\}/);
+  assert.match(css, /--font-f1:Electrolize, sans-serif/);
+  assert.match(css, /\.font-f1\{font-family:var\(--font-f1\)\}/);
   // The minifier reorders declarations and writes rgb(50,50,50) as #323232.
   for(const type of ['range', 'checkbox'])
   {
@@ -58,9 +62,9 @@ test('the built CSS keeps the design palette and font', () => {
   assert.deepEqual(missing.sort(), ['startButton']);
 });
 
-test('the build keeps the Vite 4 browser targets', () => {
+test('the build uses the browser floor Tailwind 4 needs', () => {
   const css = asset('css');
-  // Range media queries ((width>=640px)) need Safari 16.4.
-  assert.match(css, /@media \(min-width:640px\)/);
-  assert.doesNotMatch(css, /@media \(width/);
+  assert.equal(pkg.devDependencies.tailwindcss.startsWith('^4'), true);
+  assert.equal(pkg.devDependencies.autoprefixer, undefined);
+  assert.match(css, /tailwindcss v4\./);
 });

@@ -1,6 +1,12 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+@source "../../index.html";
+
+@theme {
+  --font-f1: Electrolize, sans-serif;
+  --color-mod_dark: rgb(50,50,50);
+  --color-mod_dark_light: rgb(75,75,75);
+  --color-mod_light: rgb(250,250,250);
+}
 
 /* Sliders and toggles keep the dark accent. Each is at least 44 px tall to
    tap, the size WCAG 2.5.5 and the platform guidelines ask for. */
