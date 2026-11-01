@@ -867,3 +867,18 @@ test('a fixed six-agent scene replays the recorded 200-frame trajectory', () => 
   assert.ok(close, 'actual: ' + JSON.stringify(actual));
   assert.deepEqual(Array.from(flock.agents, (a) => a.colour), GOLDEN_AGENTS.map((a) => colour(SPECIES[a.species])));
 });
+
+test('species colours are visible on the page and clearly different', () => {
+  for(const raceCount of [2, 5, 10, 20])
+  {
+    const { flock } = scene({ flockSize: raceCount, raceCount, variance: 0 });
+    let seed = 7;
+    flock.random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    flock.Start();
+    const cols = [...new Set(flock.agents.map((a) => a.colour))].map((c) => c.match(/\d+/g).slice(0, 3).map(Number));
+    for(const [r, g, b] of cols) assert.ok(0.299 * r + 0.587 * g + 0.114 * b <= 200, String(raceCount));
+    if(raceCount <= 5)
+      for(let i = 0; i < cols.length; i++) for(let j = i + 1; j < cols.length; j++)
+        assert.ok(Math.hypot(...cols[i].map((v, k) => v - cols[j][k])) > 60, String(raceCount));
+  }
+});
