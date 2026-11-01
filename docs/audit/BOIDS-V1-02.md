@@ -155,3 +155,20 @@ prompt no longer mentions Alpine. Both changes only take effect once merged to
 
 `dist/` was rebuilt with the new tooling and committed, so a fresh build still
 matches it byte for byte, as `test/build.test.js` requires.
+
+## CAL-1644: Tailwind 4
+
+The owner chose to migrate to Tailwind 4 (CAL-1411, option B), reversing §4.
+
+- `tailwindcss` is `^4.3.3`, run through `@tailwindcss/vite`. `autoprefixer`,
+  `postcss`, `postcss.config.cjs` and `tailwind.config.cjs` are gone.
+- The config is in `src/stylesheets/style.css`: `@import "tailwindcss"
+  source(none)`, `@source "../../index.html"` (the same single scanned file) and
+  a `@theme` block with the `f1` font and the `mod_*` colours.
+- The browser floor rises to Chrome 111, Safari 16.4 and Firefox 128 (what
+  Tailwind 4 needs). The `build.target` override that kept the Vite 4 targets
+  is removed, so Vite's default applies and media queries use range syntax.
+- Preflight differs from v3 (for example `border` colour, `button` cursor and
+  placeholder colour defaults); the visual output should be reviewed in a real
+  browser, which was not possible here.
+- The moderate `tailwindcss` / `postcss-selector-parser` advisory is gone.

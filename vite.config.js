@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import tailwindcss from '@tailwindcss/vite'
 
 // Where the site is served from. The default is the GitHub Pages project site
 // https://calypsogrammar.github.io/boids/, which the committed dist/ is built
@@ -12,11 +13,8 @@ export function basePath(value = '/boids/')
 }
 
 export default defineConfig({
+  plugins: [tailwindcss()],
   base: basePath(process.env.BASE_PATH || undefined),
-  build: {
-    // Vite 7+ defaults to 'baseline-widely-available' (Safari 16.4+), which
-    // also rewrites CSS media queries to range syntax. Keep the browser
-    // support the site had under Vite 4 (its 'modules' default).
-    target: ['es2020', 'edge88', 'firefox78', 'chrome87', 'safari14'],
-  },
+  // No build.target override: Vite's default, 'baseline-widely-available'
+  // (Chrome 111, Safari 16.4, Firefox 114), is the floor Tailwind 4 needs.
 })
