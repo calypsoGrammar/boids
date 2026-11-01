@@ -294,7 +294,6 @@ Step()
 
 GetNearbyAgents(agent, length)
 {
-  if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
   // The agent's lists are refilled in place, so a tick allocates no arrays.
   let context = agent.nearby;
   let closeContext = agent.close;
