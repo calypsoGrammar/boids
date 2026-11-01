@@ -15,6 +15,12 @@ const DEFAULT_MIN_SPEED = 0.5;
 const DEFAULT_MAX_SPEED = 2.5;
 const DEFAULT_FLOCK_SIZE = 50;
 const AGENT_RADIUS = 5;
+// Species colours come from a curated palette: every colour has a WCAG
+// contrast of at least 3:1 against the rgb(250,250,250) page and every pair is
+// at least 100 apart in RGB, so species are visible and tell apart.
+const COLOUR_PALETTE = [[200, 30, 30], [0, 135, 255], [0, 150, 0], [225, 0, 255], [30, 0, 120], [135, 135, 150],
+  [75, 0, 255], [75, 15, 0], [135, 135, 0], [0, 120, 120], [150, 0, 150], [240, 75, 135]];
+const MIN_COLOUR_CONTRAST = 3;
 // The simulation advances in fixed ticks of this many ms (125 per second, the
 // rate of the old 8 ms interval), however often the screen refreshes.
 const TICK_MS = 8;
@@ -118,6 +124,30 @@ class Flock
     this.random = Math.random;
   }
 
+// Relative luminance of an sRGB colour (WCAG), 0 black to 1 white.
+static Luminance(col)
+{
+  let [r, g, bl] = col.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+}
+
+// Contrast ratio of a colour against the rgb(250,250,250) page.
+static Contrast(col)
+{
+  return (Flock.Luminance([250, 250, 250]) + 0.05) / (Flock.Luminance(col) + 0.05);
+}
+
+// The colour of a species. The drawn colour picks one of the palette colours
+// still free; only past the palette does the drawn colour itself get used,
+// darkened until it is visible on the page.
+SpeciesColour(col, races)
+{
+  let free = COLOUR_PALETTE.filter((c) => !races.some((race) => race.every((v, j) => v === c[j])));
+  if(free.length > 0) return free[Math.min(free.length - 1, Math.floor(col[0] / 255 * free.length))].slice();
+  while(Flock.Contrast(col) < MIN_COLOUR_CONTRAST) col = col.map((v) => Math.floor(v * 0.9));
+  return col;
+}
+
 Start()
 {
   this.Validate();
@@ -130,17 +160,12 @@ Start()
 
   for(let i = 0; i < this.raceCount; i++)
   {
-    // Species are told apart by colour, so a colour already taken is drawn
-    // again.
-    let col;
-    do
-    {
-      let r = Math.floor(this.random() * 255);
-      let g = Math.floor(this.random() * 255);
-      let b = Math.floor(this.random() * 255);
-      col = [r, g, b];
-    }
-    while(races.some((race) => race.every((value, j) => value === col[j])));
+    // Three draws per species; SpeciesColour() turns them into a palette colour.
+    let r = Math.floor(this.random() * 255);
+    let g = Math.floor(this.random() * 255);
+    let b = Math.floor(this.random() * 255);
+    let col = [r, g, b];
+    col = this.SpeciesColour(col, races);
     races.push(col);
   }
 
@@ -263,14 +288,16 @@ Step()
   let steerX = this.steerX;
   let steerY = this.steerY;
   let grid = len >= GRID_MIN_AGENTS && this.BuildGrid(len);
+  if(this.steerOut === undefined) this.steerOut = new Float64Array(2);
+  let out = this.steerOut;
   for(let i = 0; i < len; i++)
   {
     this.agents[i].outBox = false;
     if(grid) this.GetNearbyAgentsGrid(this.agents[i]);
     else this.GetNearbyAgents(this.agents[i], len);
-    let steer = this.Steer(this.agents[i]);
-    steerX[i] = steer[0];
-    steerY[i] = steer[1];
+    this.SteerInto(this.agents[i], out, grid ? this.grid : null);
+    steerX[i] = out[0];
+    steerY[i] = out[1];
   }
   let edges = null; // the box edges, worked out once per agent radius
   for(let i = 0; i < len; i++)
@@ -361,6 +388,8 @@ BuildGrid(length)
       cellOf: new Int32Array(length),
       xs: new Float64Array(length),
       ys: new Float64Array(length),
+      vxs: new Float64Array(length),
+      vys: new Float64Array(length),
       items: new Int32Array(length),
       found: new Int32Array(9 * length),
       start: new Int32Array(count + 1),
@@ -368,13 +397,15 @@ BuildGrid(length)
       from: new Int32Array(count + 1),
     };
   }
-  let { cellOf, xs, ys, items, found, start, fill, from } = grid;
+  let { cellOf, xs, ys, vxs, vys, items, found, start, fill, from } = grid;
   start.fill(0, 0, count + 1);
   for(let i = 0; i < length; i++)
   {
     let a = agents[i];
     xs[i] = a.x;
     ys[i] = a.y;
+    vxs[i] = a.vx;
+    vys[i] = a.vy;
     if(!Number.isFinite(a.x) || !Number.isFinite(a.y))
     {
       cellOf[i] = -1;
@@ -434,17 +465,24 @@ GetNearbyAgentsGrid(agent)
   if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
   let context = agent.nearby;
   let closeContext = agent.close;
-  context.length = 0;
-  closeContext.length = 0;
   let { minX, minY, cell, cols, from, found, xs, ys } = this.grid;
   let range = agent.vision;
   let tooClose = agent.closeVision;
   let x = agent.x;
   let y = agent.y;
-  if(!Number.isFinite(x) || !Number.isFinite(y)) return;
+  if(!Number.isFinite(x) || !Number.isFinite(y))
+  {
+    context.length = 0;
+    closeContext.length = 0;
+    return;
+  }
   let c = Math.floor((y - minY) / cell) * cols + Math.floor((x - minX) / cell);
-  let n = from[c + 1];
-  for(let k = from[c]; k < n; k++)
+  let end = from[c + 1];
+  // Lists are overwritten by index and cut to size at the end, so their
+  // storage is not dropped and regrown every tick.
+  let nc = 0;
+  let ncl = 0;
+  for(let k = from[c]; k < end; k++)
   {
     let i = found[k];
     if(i == agent.index) continue;
@@ -453,10 +491,12 @@ GetNearbyAgentsGrid(agent)
     let yDif = Math.abs(y - ys[i]);
     if(yDif < range)
     {
-      context.push(i);
-      if(xDif < tooClose && yDif < tooClose) closeContext.push(i);
+      context[nc++] = i;
+      if(xDif < tooClose && yDif < tooClose) closeContext[ncl++] = i;
     }
   }
+  if(context.length !== nc) context.length = nc;
+  if(closeContext.length !== ncl) closeContext.length = ncl;
 }
 
 Adjust(agent)
@@ -471,7 +511,19 @@ Adjust(agent)
 // changes nothing.
 Steer(agent)
 {
-  if(agent.nearby.length === 0) return [0, 0];
+  let out = new Float64Array(2);
+  this.SteerInto(agent, out, null);
+  return [out[0], out[1]];
+}
+
+// Steer() writing into out[0], out[1] instead of returning an array. With
+// `snap` (the grid's start-of-tick copies of x, y, vx, vy) the neighbours'
+// state is read from its typed arrays rather than from the agent objects.
+SteerInto(agent, out, snap)
+{
+  out[0] = 0;
+  out[1] = 0;
+  if(agent.nearby.length === 0) return;
 
   let newX = 0
   let newY = 0;
@@ -492,9 +544,10 @@ Steer(agent)
 
       for(let i = 0; i < agent.close.length; i++)
       {
-        let other = this.agents[agent.close[i]];
-        let xDif = agent.x - other.x;
-        let yDif = agent.y - other.y;
+        let j = agent.close[i];
+        let other = this.agents[j];
+        let xDif = agent.x - (snap ? snap.xs[j] : other.x);
+        let yDif = agent.y - (snap ? snap.ys[j] : other.y);
         let dist = Math.sqrt(xDif * xDif + yDif * yDif);
 
         if(dist === 0)
@@ -532,22 +585,27 @@ Steer(agent)
 
     for(let i = 0; i < agent.nearby.length; i++)
     {
-      let other = this.agents[agent.nearby[i]];
+      let j = agent.nearby[i];
+      let other = this.agents[j];
+      let ox = snap ? snap.xs[j] : other.x;
+      let oy = snap ? snap.ys[j] : other.y;
+      let ovx = snap ? snap.vxs[j] : other.vx;
+      let ovy = snap ? snap.vys[j] : other.vy;
       if(agent.colour === other.colour)
       {
         // Dividing by 1 changes nothing.
-        alignX += other.vx;
-        alignY += other.vy;
-        cohereX += other.x;
-        cohereY += other.y;
+        alignX += ovx;
+        alignY += ovy;
+        cohereX += ox;
+        cohereY += oy;
         weight += 1;
       }
       else
       {
-        alignX += other.vx / divisor;
-        alignY += other.vy / divisor;
-        cohereX += other.x / divisor;
-        cohereY += other.y / divisor;
+        alignX += ovx / divisor;
+        alignY += ovy / divisor;
+        cohereX += ox / divisor;
+        cohereY += oy / divisor;
         weight += 1 / divisor;
       }
     }
@@ -565,7 +623,8 @@ Steer(agent)
       newY += ( cohereY / weight - agent.y ) * cohesion;
     }
   }
-  return [newX, newY];
+  out[0] = newX;
+  out[1] = newY;
 }
 
 // The box inset used on a canvas axis of `size` px: the setting, capped so
