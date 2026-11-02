@@ -317,7 +317,6 @@ Step()
 
 GetNearbyAgents(agent, length)
 {
-  if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
   // The agent's lists are refilled in place, so a tick allocates no arrays.
   let context = agent.nearby;
   let closeContext = agent.close;
@@ -467,7 +466,6 @@ BuildGrid(length)
 // same sums), from the grid of the current tick.
 GetNearbyAgentsGrid(agent)
 {
-  if(agent.x < 0 || agent.x > this.width || agent.y < 0 || agent.y > this.height) return;
   let context = agent.nearby;
   let closeContext = agent.close;
   let { minX, minY, cell, cols, from, found, fx, fy } = this.grid;

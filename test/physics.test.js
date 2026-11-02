@@ -885,3 +885,18 @@ test('species colours are visible on the page and clearly different', () => {
         assert.ok(Math.hypot(...cols[i].map((v, k) => v - cols[j][k])) >= 100, `${label}: ${cols[i]} ${cols[j]}`);
     }
 });
+
+// CAL-1485 (D10): agents outside the canvas get a fresh neighbour search.
+test('agents outside the canvas refresh their neighbour lists', () => {
+  const { flock } = scene({ agents: [
+    { x: -10, y: 100, vx: 1, vy: 0, species: 0 },
+    { x: -5, y: 104, vx: 1, vy: 0, species: 0 },
+    { x: 500, y: 500, vx: 1, vy: 0, species: 0 },
+  ] });
+  const agent = flock.agents[0];
+  agent.nearby.push(2);
+  agent.close.push(2);
+  flock.GetNearbyAgents(agent, flock.agents.length);
+  assert.deepEqual([...agent.nearby], [1]);
+  assert.deepEqual([...agent.close], [1]);
+});
