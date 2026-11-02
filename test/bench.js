@@ -20,7 +20,8 @@ export const SCENARIOS = {
   'species-200': { seed: 3, frames: 500, settings: { flockSize: 200, raceCount: 10, bias: 100 } },
   'turn-box-200': { seed: 4, frames: 500, settings: { flockSize: 200, wrap: false, boxX: 150, boxY: 150 } },
   'overlays-200': { seed: 5, frames: 300, settings: { flockSize: 200, shape: 'line', nearby: true, close: true } },
-  // Beyond the slider's 200, to show how the all-pairs neighbour search scales.
+  // Beyond the slider's 200, to show how neighbour search scales (spatial grid,
+  // CAL-1482; docs/audit/CAL-1482.md).
   'stress-1000': { seed: 6, frames: 100, settings: { flockSize: 1000 } },
 };
 

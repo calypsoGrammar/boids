@@ -20,7 +20,7 @@ const rule = (selector, from = css) =>
 // The CSS inside the first `@media <query>` block.
 const media = (query) =>
 {
-  const at = css.indexOf('@media ' + query + '{');
+  const at = css.lastIndexOf('@media ' + query + '{'); // the last: Tailwind's utilities come first
   assert.ok(at >= 0, query);
   let depth = 0;
   for(let i = at; i < css.length; i++)
@@ -272,17 +272,17 @@ test('the settings panel scrolls inside the window height', () => {
   const panel = rule('.settings-panel');
   assert.ok(panel.includes('overflow-y:auto'));
   assert.ok(panel.includes('overscroll-behavior:contain'));
-  assert.ok(panel.includes('max-height:calc(var(--vh,1vh) * 100 - 5.5rem - env(safe-area-inset-top))'));
+  assert.ok(panel.includes('max-height:calc(var(--vh,1vh) * 100 - 5.5rem - var(--status-room,0px) - env(safe-area-inset-top))'));
   assert.ok(panel.includes('width:calc(100% - 12px)'), 'fits a narrow window');
   // Generate stays reachable while the groups scroll.
   assert.ok(rule('.generate-bar').includes('position:sticky'));
-  assert.ok(rule('.settings-groups', media('(min-width:640px)')).includes('grid-template-columns:repeat(2,minmax(0,1fr))'));
+  assert.ok(rule('.settings-groups', media('(width>=640px)')).includes('grid-template-columns:repeat(2,minmax(0,1fr))'));
 });
 
 test('a short landscape screen puts the settings in a column beside the flock', () => {
-  const landscape = media('(orientation:landscape) and (max-height:520px)');
+  const landscape = media('(orientation:landscape) and (height<=520px)');
   assert.ok(rule('.settings-panel', landscape).includes('width:min(380px,55%)'));
-  assert.ok(rule('.settings-panel', landscape).includes('max-height:calc(var(--vh,1vh) * 100 - 12px)'));
+  assert.ok(rule('.settings-panel', landscape).includes('max-height:calc(var(--vh,1vh) * 100 - 12px - var(--status-room,0px))'));
   assert.ok(rule('.toolbar', landscape).includes('transform:none'));
   assert.ok(rule('.settings-groups', landscape).includes('grid-template-columns:minmax(0,1fr)'));
 });
@@ -291,12 +291,11 @@ test('buttons, sliders and toggles are at least 44 px to tap', () => {
   assert.ok(rule('.tool').includes('width:2.75rem') && rule('.tool').includes('height:2.75rem'));
   assert.ok(rule('input[type=range]').includes('height:2.75rem'));
   assert.ok(rule('.choice').includes('min-height:2.75rem'));
-  assert.ok(css.includes('.h-11{height:2.75rem}'), 'Generate');
+  assert.ok(css.includes('.h-11{height:calc(var(--spacing) * 11)}'), 'Generate');
 });
 
 test('focus is visible and tooltips show on hover and keyboard focus', () => {
-  for(const selector of ['button:focus-visible', 'input:focus-visible'])
-    assert.deepEqual(rule(selector).sort(), ['outline-offset:2px', 'outline:2px solid #323232'], selector);
+  assert.deepEqual(rule('button:focus-visible,input:focus-visible').sort(), ['outline-offset:2px', 'outline:2px solid #323232']);
   assert.ok(rule('.tool:focus-visible .tooltip').includes('opacity:1'));
   assert.ok(rule('.tool:hover .tooltip', media('(hover:hover)')).includes('opacity:1'));
   // A tap does not leave a hover highlight behind on a touch screen.
@@ -317,4 +316,10 @@ test('the panel text stays opaque over the flock', () => {
   assert.doesNotMatch(read('index.html'), /opacity:\s*90%/);
   assert.ok(rule('.settings-panel').includes('background-color:#fafafaf0'));
   assert.ok(rule('.hint').includes('color:#4b4b4b'), 'rgb(75,75,75) on rgb(250,250,250), over 7:1');
+});
+
+test('the settings panel leaves room for the status so it never covers the Generate bar', () => {
+  assert.ok(rule('.settings-panel').includes('max-height:calc(var(--vh,1vh) * 100 - 5.5rem - var(--status-room,0px) - env(safe-area-inset-top))'));
+  assert.ok(rule('.settings-panel', media('(orientation:landscape) and (height<=520px)')).join().includes('var(--status-room,0px)'));
+  assert.ok(!rule('.settings-panel', media('(orientation:portrait)')).join().includes('status-room'), 'the status is at the top in portrait');
 });

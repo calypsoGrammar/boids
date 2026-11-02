@@ -155,3 +155,50 @@ prompt no longer mentions Alpine. Both changes only take effect once merged to
 
 `dist/` was rebuilt with the new tooling and committed, so a fresh build still
 matches it byte for byte, as `test/build.test.js` requires.
+
+## CAL-1644: Tailwind 4
+
+The owner chose to migrate to Tailwind 4 (CAL-1411, option B), reversing §4.
+
+**Tooling**
+
+- `tailwindcss` is `^4.3.3`, run through `@tailwindcss/vite`. `autoprefixer`,
+  `postcss`, `postcss.config.cjs` and `tailwind.config.cjs` are gone.
+- The config is in `src/stylesheets/style.css`: `@import "tailwindcss"
+  source(none)`, `@source "../../index.html"` (the same single scanned file) and
+  a `@theme` block with the `f1` font and the `mod_*` colours (same values).
+- The browser floor rises to Chrome 111, Safari 16.4 and Firefox 128. The
+  `build.target` override that kept the Vite 4 targets is removed, so Vite's
+  default applies and media queries use range syntax (`(width>=640px)`).
+- The moderate `tailwindcss` / `postcss-selector-parser` advisory is gone.
+
+**Visual changes for this page** (the previous built CSS compared with the new
+one, then checked against `index.html` and `style.css`):
+
+1. *Inherited line height.* v3 wrote `.text-base{font-size:1rem;line-height:1.5rem}`
+   on `<body>`, so every child inherited a fixed 24 px. v4 writes
+   `--text-base--line-height:calc(1.5 / 1)`, a ratio, so each child gets 1.5 times
+   its own font size. Lines that set no line height of their own move:
+   14 px `.hint` and `.notice` text 24 px to 21 px, the 12 px `.cue` pill
+   24 px to 18 px, and the 18 px group legends 24 px to 27 px. Panel height
+   changes by a few pixels as a result. (`.tooltip` sets its own line height, and
+   `text-lg`, `text-2xl`, `leading-none` are unchanged.)
+2. *Button cursor.* v3 preflight set `cursor:pointer` on `button`; v4 leaves the
+   default arrow. The icon buttons (`.tool`) and Generate no longer show a hand.
+   Ranges and `.choice` labels still set their own pointer.
+3. *Hover on touch screens.* `hover:bg-mod_dark_light` on Generate is now inside
+   `@media (hover:hover)`, so a touch screen no longer keeps the lighter
+   background after a tap. `.tool:hover` already had this guard.
+4. *Press animation.* `motion-safe:active:scale-95` now uses the `scale`
+   property instead of `transform`; same 95 % result, no visible change.
+5. *Shadow and colours.* `shadow-lg` uses the same shadow values; colours are
+   the same (`#323232`, `#4b4b4b`, `#fafafa`) but now come from CSS variables.
+
+Border colour and placeholder defaults also changed in v4 preflight, but the
+page does not use them: every visible border in `style.css` sets its colour,
+and there is no text input.
+
+**What is checked.** `test/layout.test.js` and `test/pages.test.js` run in
+Chromium and measure layout, tap sizes and controls, and `test/ui.test.js` checks
+the built CSS rules. What is left for a person is the look: item 1's spacing and
+item 2's cursor, on a desktop and a phone.
