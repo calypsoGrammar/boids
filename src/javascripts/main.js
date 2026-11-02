@@ -1180,6 +1180,16 @@ function ShowStatus()
   let text = [notices.error, notices.viewport, notices.input].filter((notice) => notice !== "").join(" ");
   statusMessage.textContent = text;
   statusMessage.style.display = text === "" ? "none" : "";
+  // Room the settings panel leaves for a status at the bottom (style.css): the
+  // rendered status, from its top edge down. A status at the top (portrait)
+  // needs none. The text wraps, so this is measured, not fixed.
+  let room = 0;
+  if(text !== "" && typeof statusMessage.getBoundingClientRect === "function")
+  {
+    let rect = statusMessage.getBoundingClientRect();
+    if(rect.bottom > window.innerHeight / 2) room = window.innerHeight - rect.top;
+  }
+  document.documentElement.style.setProperty("--status-room", room + "px");
 }
 
 // Sizes the canvas to the window. Its logical size, in CSS pixels, is what the
