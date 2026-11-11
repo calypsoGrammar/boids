@@ -84,6 +84,11 @@ archon:
     # blocker's open pull request once that blocker is In Review (archon-v3
     # docs/operator-guide.md, Stacking). Stacks are one level deep.
     mode: single
+  # Chain test, November 2026 (project and chain context only): the same five "Commands" tickets run in
+  # Game of Life, Boids, L-Systems and Maze Maker with each combination of these.
+  chain:
+    context: true
+    replan: false
 ---
 You are working on Boids, issue {{ issue.identifier }}: {{ issue.title }}.
 {% if attempt %}
