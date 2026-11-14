@@ -14,9 +14,9 @@ counts as shipped only once §5 has a filled-in record.
 | What | Where |
 | --- | --- |
 | Source | `main` of https://github.com/calypsoGrammar/boids |
-| Release build | `dist/`, committed on `main`; CI and the release workflow check that a fresh build matches it byte for byte |
+| Release build | `dist/`, committed on `main`; CI checks that a fresh build matches it byte for byte, and the deploy publishes it as committed |
 | Production URL | https://calypsogrammar.github.io/boids/ (owner's answer on CAL-1290) |
-| Publisher | `.github/workflows/pages.yml`, on every push to `main` |
+| Publisher | `.github/workflows/deploy.yml`, by hand only (the shared Pages deploy in `calypsoGrammar/deploy-workflows`) |
 | Host | GitHub Pages only. The owner plans to remove any other copy (such as Cloudways) |
 
 No custom domain is planned. If one is added later, follow §7.
@@ -42,7 +42,7 @@ build works only at the path it was made for. `test/pages.test.js` shows a
 | Root of a host, such as a custom domain | `BASE_PATH=/ npm run build -- --outDir <elsewhere>` | `/assets/…`, `/play.svg`, … |
 
 - `BASE_PATH` must start and end with `/`. The build fails on anything else.
-- Never commit a root build to `dist/`. CI and the release workflow would
+- Never commit a root build to `dist/`. CI would
   fail, since they compare `dist/` with a default build.
 - The four toolbar icons are now all written `/name.svg` in `index.html`, so
   Vite puts each under the base. Before, Step and Settings used
@@ -65,35 +65,30 @@ Checks:
 
 ## 3. The release workflow
 
-`.github/workflows/pages.yml`:
+`.github/workflows/deploy.yml` calls the shared `github-pages.yml@v1` in
+`calypsoGrammar/deploy-workflows`:
 
-- **Triggers:** a push to `main` (a merged pull request), or *Run workflow*
-  on `main`. It has no `pull_request` trigger. Both jobs skip any ref other
-  than `main`. Pull request checks are only in `ci.yml`, which can only read.
-- **Build job** (`contents: read`, `pages: read`): checks out the commit
-  without keeping credentials and sets up Node 24. Then:
-  1. `configure-pages`.
-  2. A check that Pages serves the site from `/boids`. A custom domain makes
-     the job fail instead of publishing a build that can't load (§7).
-  3. `npm ci`, `npm audit --audit-level=high`, `npm run lint` and
-     `npm run build`.
-  4. A check that the build equals the committed `dist/`, with no untracked
-     file.
-  5. `npm test`.
-  6. Uploads `dist/` alone as the Pages artifact.
-- **Deploy job** (`pages: write`, `id-token: write`): runs only after the
-  build job passes. It deploys the artifact through the `github-pages`
-  environment with `deploy-pages`, and the run shows the page URL.
-- The workflow has no default permissions (`permissions: {}`). One release
-  runs at a time, and a newer merge waits instead of cancelling one already
-  running.
-- A new high or critical advisory fails `npm audit` and holds releases back
-  until the dependency is updated. That is deliberate.
+- **Trigger:** *Run workflow* only. Merging to `main` never publishes. A run
+  is a dry run (checks, publishes nothing) unless **Dry run** is unticked.
+- **Which commit:** `ref` (empty means `main`). The deploy refuses a commit
+  that isn't on `main`, or on which any of the CI jobs `Node 22.13`,
+  `Node 24`, `Node 26` and `Security audit` didn't pass.
+- **What it publishes:** the commit's committed `dist/`, without rebuilding
+  it (`build_command: ''`). CI runs on pull requests and on `main`, and checks
+  that `npm ci`, `npm run lint`, `npm run build` and `npm test` pass and that a
+  fresh build equals the committed `dist/` with no untracked file.
+- **Records:** every real run records a GitHub deployment with task
+  `release`. One publish runs at a time.
+- `stable.yml` moves the `stable` tag to a release once it has been live for
+  48 hours, and clears the production hold after a rollback (§6).
+- A new high or critical advisory fails `Security audit` and holds releases
+  back until the dependency is updated. That is deliberate.
 - The project has no TypeScript, so there is no type-check step. ESLint is
   the static check.
 
-`test/release.test.js` checks the triggers, the permissions, the order of
-the steps and the uploaded path, and that `ci.yml` never deploys.
+`test/release.test.js` checks that the deploy runs only by hand, publishes
+the committed `dist/` and requires every CI job, and that `ci.yml` never
+deploys.
 
 ## 4. First release (owner, once)
 
@@ -108,9 +103,8 @@ ticket doesn't change it.
      serves it
    
    This is the rollback point (§6).
-2. **Merge** this change. The first `Pages` run fails at `deploy-pages`
-   while the source is still a branch, or at `configure-pages` if Pages is
-   off. The build job still shows that the checks pass.
+2. **Merge** this change and run the deploy as a dry run to see that the
+   checks pass.
 3. **Settings → Pages → Build and deployment → Source: GitHub Actions.** The
    URL stays https://calypsogrammar.github.io/boids/. Leave the `gh-pages`
    branch in place. Pages stops reading it, and it is the fallback.
@@ -121,8 +115,8 @@ ticket doesn't change it.
 5. **Settings → Branches (or Rulesets) for `main`:** require pull requests
    and the CI checks (`Node 22.13`, `Node 24`, `Node 26`,
    `Security audit`). Block force pushes.
-6. **Actions → Pages → Run workflow** on `main`, or re-run the failed run.
-   Wait for *Deploy* to pass.
+6. **Actions → deploy → Run workflow** on `main`, with **Dry run**
+   unticked. Wait for the *deploy* job to pass.
 7. **Smoke test** https://calypsogrammar.github.io/boids/ with §5, then fill
    in the record.
 
@@ -170,11 +164,11 @@ Checked by:
 
 Pick the first one that applies:
 
-1. **A bad release:** revert the merge on `main` with a pull request, and
-   merge it. The workflow publishes the reverted commit. Faster: Actions →
-   Pages → the last good run → *Re-run all jobs*. A re-run builds and
-   deploys that run's commit again. Pages artifacts expire after a day, so
-   re-run all the jobs, not only Deploy.
+1. **A bad release:** Actions → deploy → Run workflow with **Dry run**
+   unticked and the last good commit as `ref`. Or tick **rollback** with
+   `ref` empty to publish the `stable` tag; that also holds production until
+   the hold is cleared (Actions → stable → Run workflow → `clear-hold`), so
+   fix `main` first.
 2. **The workflow can't deploy at all:** Settings → Pages → Source:
    *Deploy from a branch* → `gh-pages`, with the folder recorded in §4.1. The
    site goes back to what the branch holds. This only works while the
@@ -192,7 +186,8 @@ needs explicit approval and DNS rights. Its build serves from `/`, so it is a
 code change as well as a settings change:
 
 1. In a pull request, build the release with `BASE_PATH=/` and change the
-   `/boids` check in `pages.yml` to expect an empty base path. The comparison
+   deploy to publish it. The shared deploy has no `/boids` base path check, so
+   nothing stops a `/boids/` build being published to a root domain. The comparison
    with the committed `dist/` then needs a separate default build, or
    `dist/` must move to the root base. That is an owner decision. Optionally,
    add `public/CNAME` with the hostname.
@@ -206,16 +201,16 @@ code change as well as a settings change:
 5. Keep the previous host serving until §5 passes. To roll back, restore the
    DNS records and clear the custom domain.
 
-Until then, the release workflow fails if a custom domain is set, rather
-than publishing a site that can't load.
+The previous `pages.yml` refused to publish when a custom domain was set.
+The shared deploy doesn't check this, so don't set a custom domain without
+the code change in step 1.
 
 ## 8. Maintenance
 
-- Each merge to `main` releases. Rebuild and commit `dist/` with every
-  source change (`npm run check`). The release fails if it is stale.
-- Check the Pages run after each merge. A failure leaves the previous
-  release live.
-- Update the `actions/*` versions in both workflows together.
+- Publishing is by hand after a merge. Rebuild and commit `dist/` with every
+  source change (`npm run check`). CI fails if it is stale, and the deploy
+  refuses a commit whose CI failed.
+- A failed deploy leaves the previous release live.
 - Retiring the `gh-pages` branch and any Cloudways copy is the owner's
   decision, after the release record and the rollback period. Retiring
   `gh-pages` removes rollback route 2.
