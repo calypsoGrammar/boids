@@ -21,8 +21,10 @@ commit that build.
 
 ## Release
 
-Every merge to `main` publishes `dist/` to GitHub Pages
-(`.github/workflows/pages.yml`). Pull requests only run checks. See
+Publishing to GitHub Pages is by hand: Actions → **deploy** → Run workflow
+(the shared Pages deploy in `calypsoGrammar/deploy-workflows`). It publishes
+the committed `dist/` of a commit on `main` whose CI passed. Merging does not
+publish. See
 `docs/release.md` for the Pages settings, the smoke checklist and rollback.
 
 Tests run with `node --test` and need no browser or network. See
