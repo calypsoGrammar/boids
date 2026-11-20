@@ -27,6 +27,7 @@ archon:
       - npm run lint
       - npm run build
       - npm test
+      - spiderweb refresh . --log-level warn > /dev/null && spiderweb verify . --stage merge
   preview:
     # How to run the app: screenshots of the reviewed commit for Archon's
     # evidence (archon-v3 docs/workflow-reference.md, Preview evidence), and a

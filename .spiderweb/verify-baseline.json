@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "violations": [
+    {
+      "rule": "no-narrating-comments",
+      "path": "test/fixtures.js",
+      "subject": "test/fixtures.js",
+      "detail": "narrates a change: Fixed, clearly different species colours, so fixtures never depend on the"
+    },
+    {
+      "rule": "no-swallowed-errors",
+      "path": "test/layout.test.js",
+      "subject": "test/layout.test.js",
+      "detail": "catches a rejected promise and does nothing: .catch(() => null)"
+    },
+    {
+      "rule": "no-swallowed-errors",
+      "path": "test/pages.test.js",
+      "subject": "test/pages.test.js",
+      "detail": "catches a rejected promise and does nothing: .catch(() => null)"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#$",
+      "detail": "function $ is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#Ce",
+      "detail": "function Ce is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#G",
+      "detail": "function G is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#H",
+      "detail": "function H is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#K",
+      "detail": "function K is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#Q",
+      "detail": "function Q is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#Se",
+      "detail": "function Se is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#Te",
+      "detail": "function Te is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#U",
+      "detail": "function U is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#W",
+      "detail": "function W is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#X",
+      "detail": "function X is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#Y",
+      "detail": "function Y is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#Z",
+      "detail": "function Z is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#be",
+      "detail": "function be is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#e",
+      "detail": "function e is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#m",
+      "detail": "function m is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#q",
+      "detail": "function q is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#we",
+      "detail": "function we is not used from any other file"
+    },
+    {
+      "rule": "no-unused-code",
+      "path": "dist/assets/index-B95Ubzc6.js",
+      "subject": "dist/assets/index-B95Ubzc6.js#xe",
+      "detail": "function xe is not used from any other file"
+    }
+  ]
+}
