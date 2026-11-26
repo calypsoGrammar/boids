@@ -1,6 +1,7 @@
 // Guards for the release workflows (docs/release.md): publishing happens only
-// by hand through the shared Pages deploy, it publishes the committed dist/,
-// and CI only reads the repository. Reads the workflow files as text, since no
+// by hand through the shared Cloudflare Pages deploy, it publishes a fresh
+// build for the root of boids.calypsogrammar.com, and CI only reads the
+// repository. Reads the workflow files as text, since no
 // YAML parser is installed; each check names the lines it expects.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,17 +25,17 @@ function block(text, start)
   return lines.slice(from + 1, end === -1 ? undefined : end);
 }
 
-test('the deploy runs only by hand, through the shared Pages workflow', () => {
+test('the deploy runs only by hand, through the shared Cloudflare Pages workflow', () => {
   assert.equal(block(deploy, 'on:')[0], '  workflow_dispatch:');
   assert.doesNotMatch(code(deploy), /^\s*(push|pull_request|schedule):/m);
-  assert.match(deploy, /uses: calypsoGrammar\/deploy-workflows\/\.github\/workflows\/github-pages\.yml@v\d+/);
+  assert.match(deploy, /uses: calypsoGrammar\/deploy-workflows\/\.github\/workflows\/cloudflare-pages\.yml@v\d+/);
 });
 
-test('the deploy publishes the committed dist/ without rebuilding it', () => {
-  assert.match(code(deploy), /^\s*build_command: ''$/m);
-  assert.match(code(deploy), /^\s*site_path: dist$/m);
-  // The committed dist/ is built with the default /boids/ base.
-  assert.doesNotMatch(deploy, /BASE_PATH/);
+test('the deploy builds a fresh dist/ for the root of its subdomain', () => {
+  // The committed dist/ is built for the old /boids/ path, so the deploy rebuilds with base /.
+  assert.deepEqual(block(deploy, '      build_command: |').map((line) => line.trim()), ['npm ci --no-audit --no-fund', 'npm run build -- --base=/']);
+  assert.match(code(deploy), /^\s*project_name: boids$/m);
+  assert.match(code(deploy), /^\s*site_url: https:\/\/boids\.calypsogrammar\.com$/m);
 });
 
 test('the deploy requires every CI job to have passed', () => {
