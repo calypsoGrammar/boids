@@ -1,6 +1,6 @@
 name: deploy
 
-# This site's deploy: the shared GitHub Pages workflow in calypsoGrammar/deploy-workflows (README there).
+# This site's deploy: the shared Cloudflare Pages workflow in calypsoGrammar/deploy-workflows (README there).
 # Actions → deploy → Run workflow (a dry run unless unticked). An earlier `ref` rolls back; tick `rollback`
 # with no ref to go back to the `stable` tag, which also holds publishing until cleared.
 
@@ -29,12 +29,10 @@ permissions:
   contents: write
   checks: read
   deployments: write
-  pages: write
-  id-token: write
 
 jobs:
   deploy:
-    uses: calypsoGrammar/deploy-workflows/.github/workflows/github-pages.yml@v1
+    uses: calypsoGrammar/deploy-workflows/.github/workflows/cloudflare-pages.yml@v1
     with:
       target: ${{ inputs.target }}
       ref: ${{ inputs.ref }}
@@ -46,6 +44,12 @@ jobs:
         Node 24
         Node 26
         Security audit
-      # Publish the committed dist/ as it is. CI checks that a fresh build reproduces it byte for byte.
-      build_command: ''
-      site_path: dist
+      project_name: boids
+      site_url: https://boids.calypsogrammar.com
+      # Built fresh rather than the committed dist/, which is built for the old GitHub Pages path. Served at the root of its own subdomain, so the build's base is / (vite.config.js keeps the old
+      # GitHub Pages path for local checks).
+      build_command: |
+        npm ci --no-audit --no-fund
+        npm run build -- --base=/
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

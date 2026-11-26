@@ -1,5 +1,7 @@
 # Release, hosting and rollback
 
+> **Moved to Cloudflare Pages (26 November 2026).** The site is now at <https://boids.calypsogrammar.com/>, published by `.github/workflows/deploy.yml` through the shared `cloudflare-pages.yml` in `calypsoGrammar/deploy-workflows` (the same manual, green-commits-only, rollback-by-`ref` contract). It builds with `--base=/` because the site is served at the root of its subdomain. The GitHub Pages settings, URLs and checks below are kept as history.
+
 Work for Linear CAL-1290 (BOIDS-V1-09). Boids is a static page: an
 `index.html`, one script, one stylesheet, a favicon and four icons. It needs
 no server code, database or runtime, so GitHub Pages hosts it.
