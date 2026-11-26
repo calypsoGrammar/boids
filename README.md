@@ -14,18 +14,21 @@ npm run audit:high   # fail on high or critical advisories
 npm run bench        # seeded simulation benchmarks
 ```
 
-`npm run build` writes the committed `dist/`, built for
-https://calypsogrammar.github.io/boids/. Commit the rebuilt files with any
-source change. `BASE_PATH=/` builds for the root of a host instead; never
-commit that build.
+`npm run build` writes the committed `dist/`, built for the old GitHub Pages
+path (`/boids/`); CI checks that a fresh build reproduces it. Commit the
+rebuilt files with any source change. `BASE_PATH=/` builds for the root of a
+host instead; never commit that build.
 
 ## Release
 
-Publishing to GitHub Pages is by hand: Actions → **deploy** → Run workflow
-(the shared Pages deploy in `calypsoGrammar/deploy-workflows`). It publishes
-the committed `dist/` of a commit on `main` whose CI passed. Merging does not
-publish. See
-`docs/release.md` for the Pages settings, the smoke checklist and rollback.
+The site is at https://boids.calypsogrammar.com/ on Cloudflare Pages.
+Publishing is by hand: Actions → **deploy** → Run workflow (the shared
+Cloudflare Pages deploy in `calypsoGrammar/deploy-workflows`). It builds a
+fresh `dist/` for the root of the subdomain (`--base=/`) from a commit on
+`main` whose CI passed, and uploads it. Merging does not publish. The
+repository needs the `CLOUDFLARE_API_TOKEN` secret and the
+`CLOUDFLARE_ACCOUNT_ID` variable. See `docs/release.md` for the smoke
+checklist and rollback.
 
 Tests run with `node --test` and need no browser or network. See
 `docs/audit/BOIDS-V1-03.md` for the physics fixtures, the browser smoke tests
